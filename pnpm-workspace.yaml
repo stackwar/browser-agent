@@ -1,0 +1,6 @@
+# pnpm 设置(构建脚本白名单)
+# pnpm 10+ 不再读取 package.json 的 "pnpm" 字段,改由本文件管理。
+allowBuilds:
+  electron: true
+  esbuild: true
+  electron-winstaller: true

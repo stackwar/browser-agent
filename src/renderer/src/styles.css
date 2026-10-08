@@ -1,0 +1,671 @@
+:root {
+  --bg: #1e1e2e;
+  --panel: #181825;
+  --border: #313244;
+  --text: #cdd6f4;
+  --muted: #7f849c;
+  --accent: #89b4fa;
+  --user: #313244;
+  --assistant: #24273a;
+  --ok: #a6e3a1;
+  --err: #f38ba8;
+  --warn: #f9e2af;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  height: 100%;
+}
+
+/* ---------- 分隔条 ---------- */
+/*
+ * 聊天面板和浏览器区之间的拖动把手。本体很窄,但靠透明的内边距命中区
+ * 把可抓取范围撑宽到几像素,光标好对准。
+ */
+.splitter {
+  flex: none;
+  width: 5px;
+  background: var(--border);
+  cursor: col-resize;
+  /* 拖动时别选中周围文字 */
+  user-select: none;
+  touch-action: none;
+  transition: background 0.12s ease;
+}
+
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--accent);
+}
+
+.splitter:focus-visible {
+  outline: none;
+}
+
+/*
+ * 拖动期间:指针一旦移到 <webview> 上,事件就不再回传宿主,拖动会断线。
+ * pointer capture 已经把事件钉在分隔条上,这里再屏掉 webview 的命中测试
+ * 做双保险,顺带把全局光标锁成 col-resize、禁掉选区,拖动手感更稳。
+ */
+.app.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.app.resizing .webview {
+  pointer-events: none;
+}
+
+/* ---------- 聊天面板 ---------- */
+.chat-panel {
+  /* 宽度由 usePanelWidth 以内联 style 控制;这里只负责不被 flex 压缩或拉伸,
+     min/max 的约束在 hook 里做(clamp),CSS 不再写死,否则两处会打架 */
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+/* 次要按钮:清空历史、附加图片这类不该抢主操作注意力的 */
+button.ghost {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+button.ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+button.ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 拖入图片时给整个面板一个落点提示 */
+.chat-panel.dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.msg {
+  display: flex;
+}
+
+.msg.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: 85%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+/* markdown 正文:块级元素由 markdown 产生,这里收掉默认外边距再逐类补样式 */
+.bubble-text > *:first-child {
+  margin-top: 0;
+}
+
+.bubble-text > *:last-child {
+  margin-bottom: 0;
+}
+
+.bubble-text p {
+  margin: 0 0 8px;
+}
+
+.bubble-text ul,
+.bubble-text ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.bubble-text li {
+  margin: 2px 0;
+}
+
+.bubble-text h1,
+.bubble-text h2,
+.bubble-text h3,
+.bubble-text h4 {
+  margin: 10px 0 6px;
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.bubble-text a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.bubble-text a:hover {
+  text-decoration: underline;
+}
+
+/* 行内代码 */
+.bubble-text code {
+  padding: 1px 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+
+/* 代码块:块内的 code 去掉行内样式,交给 pre */
+.bubble-text pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.bubble-text pre code {
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+.bubble-text blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.bubble-text table {
+  border-collapse: collapse;
+  margin: 0 0 8px;
+  font-size: 0.95em;
+}
+
+.bubble-text th,
+.bubble-text td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+
+.bubble-text img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.bubble-aborted {
+  border-left: 2px solid var(--warn);
+}
+
+.bubble-error {
+  border-left: 2px solid var(--err);
+}
+
+.msg.user .bubble {
+  background: var(--user);
+}
+
+.msg.assistant .bubble {
+  background: var(--assistant);
+}
+
+/* 已发消息里的缩略图(antd Image:外层 .ant-image 包着 img) */
+.bubble-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.bubble-thumbs .ant-image {
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.bubble-thumbs .ant-image-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+}
+
+.bubble-thumbs .ant-image-mask {
+  font-size: 12px;
+}
+
+/* 待发图片 */
+.tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.tray-item {
+  position: relative;
+  width: 56px;
+  height: 56px;
+}
+
+.tray-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.tray-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--err);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tray-note {
+  padding: 6px 10px 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.composer button.attach {
+  padding: 0 10px;
+  height: 34px;
+  font-size: 15px;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.composer textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.composer button {
+  padding: 0 16px;
+  background: var(--accent);
+  color: #11111b;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer button.stop {
+  background: var(--err);
+}
+
+/* ---------- 步骤轨迹 ---------- */
+.steps {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.steps:last-child {
+  margin-bottom: 0;
+}
+
+.step-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.step-icon {
+  width: 12px;
+  flex: none;
+  color: var(--muted);
+}
+
+.step.done .step-icon {
+  color: var(--ok);
+}
+
+.step.error .step-icon {
+  color: var(--err);
+}
+
+.step.aborted .step-icon {
+  color: var(--warn);
+}
+
+.step.running .step-icon {
+  color: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step.running .step-icon {
+    animation: none;
+  }
+}
+
+.step-title {
+  flex: 1;
+}
+
+.step.aborted .step-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.step-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-notes {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.step-error {
+  margin: 2px 0 0 18px;
+  color: var(--err);
+  font-size: 12px;
+}
+
+/* ---------- 浏览器区域 ---------- */
+.workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.browser-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.toolbar button {
+  min-width: 32px;
+  height: 28px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: var(--assistant);
+}
+
+.toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.url-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.webview-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.webview {
+  flex: 1;
+  background: #fff;
+  display: flex;
+}
+
+/* ---------- 控制权 ---------- */
+
+/* agent 操作期间盖住整个浏览器区域,拦掉用户的鼠标输入 */
+.control-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12px;
+  background: rgba(30, 30, 46, 0.12);
+  cursor: pointer;
+  border: 2px solid var(--accent);
+}
+
+.control-overlay:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -4px;
+}
+
+.control-overlay-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.control-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-dot {
+    animation: none;
+  }
+}
+
+.control-hint {
+  color: var(--muted);
+}
+
+/*
+ * 用户持有控制权时只留顶部横幅。关键是不能盖住 webview ——
+ * 横幅用 absolute 定位且不铺满,用户才点得到页面。
+ */
+.control-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--warn);
+  font-size: 12px;
+}
+
+.control-banner-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.control-reason {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-note {
+  flex: 1;
+  min-width: 80px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.control-note:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.control-note:disabled {
+  opacity: 0.4;
+}
+
+.control-banner button {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  background: var(--warn);
+  color: #11111b;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---------- 状态栏 ---------- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status-sep {
+  color: var(--border);
+}

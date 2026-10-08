@@ -1,0 +1,19 @@
+appId: com.example.browser-agent
+productName: Browser Agent
+directories:
+  buildResources: build
+files:
+  - out/**
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.{js,ts,mjs,cjs}"
+  - "!{.gitignore,README.md,electron-builder.yml,tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}"
+win:
+  target: nsis
+mac:
+  target: dmg
+  category: public.app-category.developer-tools
+linux:
+  target: AppImage
+  category: Development
