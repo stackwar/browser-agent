@@ -58,7 +58,7 @@ interface Props {
 }
 
 const GREETING =
-  '你好,我是浏览器 Agent 助手。发消息后我会观察右侧页面并汇报看到的内容,执行过程中可以随时停止。'
+  '你好,我是聚运赢客户端 Agent 助手'
 
 /**
  * markdown 里的链接不能用默认行为点开 —— 在 Electron 渲染层里 `<a href>`
@@ -377,26 +377,26 @@ export default function ChatPanel({ targetId, width }: Props) {
                   sessions.length === 0
                     ? [{ key: '__empty__', disabled: true, label: '暂无历史会话' }]
                     : sessions.map((s) => ({
-                        key: s.id,
-                        label: (
-                          <div className="session-item">
-                            <span className="session-item-title">{s.title}</span>
-                            <span className="session-item-meta">
-                              {fmtTime(s.updatedAt)} · {s.messageCount}
-                            </span>
-                            <Tooltip title="删除会话">
-                              <DeleteOutlined
-                                className="session-item-del"
-                                role="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void deleteSession(s.id)
-                                }}
-                              />
-                            </Tooltip>
-                          </div>
-                        )
-                      }))
+                      key: s.id,
+                      label: (
+                        <div className="session-item">
+                          <span className="session-item-title">{s.title}</span>
+                          <span className="session-item-meta">
+                            {fmtTime(s.updatedAt)} · {s.messageCount}
+                          </span>
+                          <Tooltip title="删除会话">
+                            <DeleteOutlined
+                              className="session-item-del"
+                              role="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void deleteSession(s.id)
+                              }}
+                            />
+                          </Tooltip>
+                        </div>
+                      )
+                    }))
                 }
               />
             }
