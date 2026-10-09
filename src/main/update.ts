@@ -43,14 +43,23 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
     const res = await fetch(feedUrl(), { signal: controller.signal })
     clearTimeout(timer)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const m = (await res.json()) as { version?: string; url?: string; notes?: string }
+    const m = (await res.json()) as {
+      version?: string
+      url?: string
+      notes?: string
+      platforms?: Record<string, string>
+    }
     const latest = String(m.version ?? '').trim()
     const hasUpdate = latest.length > 0 && compareVersion(latest, current) > 0
+    // 按平台/架构选下载地址:platforms['darwin-arm64' | 'darwin-x64' | 'win32-x64' | 'linux-x64' | …],
+    // 没有对应项则回退到顶层 url
+    const key = `${process.platform}-${process.arch}`
+    const url = m.platforms?.[key] || m.url || ''
     return {
       currentVersion: current,
       latestVersion: latest || current,
       hasUpdate,
-      url: m.url ?? '',
+      url,
       notes: m.notes ?? ''
     }
   } catch (err) {
