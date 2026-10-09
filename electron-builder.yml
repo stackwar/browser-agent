@@ -1,7 +1,10 @@
-appId: com.example.browser-agent
-productName: Browser Agent
+appId: com.juyunying.browser-agent
+productName: 聚运赢
 directories:
   buildResources: build
+extraResources:
+  - from: resources/cos-upload
+    to: cos-upload
 files:
   - out/**
   - "!**/.vscode/*"

@@ -1,0 +1,9 @@
+{
+  "secret_id": "在此填写腾讯云 SecretId",
+  "secret_key": "在此填写腾讯云 SecretKey",
+  "bucket": "your-bucket-1250000000",
+  "region": "ap-shanghai",
+  "key_prefix": "ss/yuque",
+  "public_base": "https://kb-resources.juxieyun.com/",
+  "yuque_token": ""
+}

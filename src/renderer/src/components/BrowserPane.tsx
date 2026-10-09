@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import ControlOverlay from './ControlOverlay'
 import { useControl } from '../hooks/useControl'
 
-const DEFAULT_URL = 'https://dev-ss.jushuitan.com'
+const DEFAULT_URL = 'https://ssyy.erp321.com'
 
 function normalizeUrl(raw: string): string {
   const trimmed = raw.trim()

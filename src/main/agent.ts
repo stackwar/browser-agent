@@ -7,6 +7,9 @@ import type {
 import * as actions from './actions'
 import * as control from './control'
 import * as session from './session'
+import * as settings from './settings'
+import { getTool, listTools } from './tools'
+import { agentKnowledge } from './knowledge'
 import type { ImageAttachment, PageSnapshot } from '../shared/types'
 
 /**
@@ -33,14 +36,22 @@ const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 const MAX_TOKENS = 8000
 
 /**
- * 支持图像输入的模型。DeepSeek 两个模型里只有 flash 读图
- * (/models 的 input_modalities 含 image),v4-pro 是纯文本。
+ * 可选模型及其能力。设置面板从这里列出可切换的模型。
+ * DeepSeek 两个模型里只有 flash 读图(/models 的 input_modalities 含 image)。
+ */
+export const AVAILABLE_MODELS = [
+  { id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', vision: true },
+  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', vision: false }
+] as const
+
+/**
+ * 支持图像输入的模型。
  *
  * 给不读图的模型送截图只会白烧 token 还可能报错,所以 observe 的
  * screenshot 参数是否出现在 tool schema 里由这里决定 —— 模型看不到
  * 这个参数,就不会去调它。
  */
-const VISION_MODELS = new Set(['deepseek-flash'])
+const VISION_MODELS = new Set<string>(AVAILABLE_MODELS.filter((m) => m.vision).map((m) => m.id))
 
 /** 单条消息最多附几张图。再多模型也看不过来,还会把上下文挤爆。 */
 const MAX_USER_IMAGES = 4
@@ -48,8 +59,9 @@ const MAX_USER_IMAGES = 4
 /** 可接受的图片类型。GIF 只取首帧,但 DeepSeek 兼容端点接受它。 */
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
+/** 当前模型:设置面板选的 > 环境变量 > 内置默认 */
 function currentModel(): string {
-  return process.env.BROWSER_AGENT_MODEL || DEFAULT_MODEL
+  return settings.get().model || process.env.BROWSER_AGENT_MODEL || DEFAULT_MODEL
 }
 
 function supportsVision(model: string): boolean {
@@ -70,13 +82,18 @@ export interface AgentDeps {
   signal: AbortSignal
 }
 
+/** 生效的 API key:设置里配的 > 环境变量 */
+function apiKey(): string {
+  return settings.get().apiKey || process.env.DEEPSEEK_API_KEY || ''
+}
+
 export function hasApiKey(): boolean {
-  return Boolean(process.env.DEEPSEEK_API_KEY)
+  return Boolean(apiKey())
 }
 
 function createClient(): OpenAI {
   return new OpenAI({
-    apiKey: process.env.DEEPSEEK_API_KEY,
+    apiKey: apiKey(),
     baseURL: process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL
   })
 }
@@ -196,7 +213,16 @@ function buildTools(vision: boolean): ChatCompletionFunctionTool[] {
         required: ['reason']
       }
     }
-  }
+  },
+  // 插件 / skill 注册进来的额外工具
+  ...listTools().map((t) => ({
+    type: 'function' as const,
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters as Record<string, unknown>
+    }
+  }))
   ]
 }
 
@@ -220,7 +246,9 @@ function buildSystem(vision: boolean): string {
 - 遇到登录页、验证码、支付确认这类需要用户本人决定的环节,调用 request_manual 交给他处理,不要尝试代替用户操作。
 - 用户可能随时接管浏览器自己操作。重新拿到控制权后,页面可能已经变了 —— 先 observe 再继续,别沿用接管前的编号。
 
-回答用中文,简洁说明你做了什么、结果是什么。`
+回答用中文,简洁说明你做了什么、结果是什么。
+
+${agentKnowledge()}`
 }
 
 interface ToolOutcome {
@@ -319,8 +347,15 @@ async function runTool(
     }
     case 'read_text':
       return { content: await actions.readText(targetId) }
-    default:
+    default: {
+      // 插件 / skill 注册的工具。失败按约定作为工具错误回给模型(由调用方 try/catch 处理)
+      const tool = getTool(name)
+      if (tool) {
+        const content = await tool.run(input, { targetId, lastSnapshot })
+        return { content }
+      }
       return { content: `未知工具: ${name}`, isError: true }
+    }
   }
 }
 
@@ -338,7 +373,8 @@ function buildUserMessage(prompt: string, images: ImageAttachment[]): ChatComple
       { type: 'text', text: prompt },
       ...images.map((img) => ({
         type: 'image_url' as const,
-        image_url: { url: `data:${img.mediaType};base64,${img.data}` }
+        // 有 COS 公网链接就用它(更省 token,模型可直接取);否则退回 base64
+        image_url: { url: img.url || `data:${img.mediaType};base64,${img.data}` }
       }))
     ]
   }
@@ -347,7 +383,7 @@ function buildUserMessage(prompt: string, images: ImageAttachment[]): ChatComple
 /** 丢掉类型不对的图片,并裁到数量上限 */
 function acceptImages(images: ImageAttachment[]): ImageAttachment[] {
   return images
-    .filter((img) => ALLOWED_IMAGE_TYPES.has(img.mediaType) && Boolean(img.data))
+    .filter((img) => ALLOWED_IMAGE_TYPES.has(img.mediaType) && Boolean(img.data || img.url))
     .slice(0, MAX_USER_IMAGES)
 }
 

@@ -95,6 +95,69 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.chat-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+/* 清空 / 设置是 antd text 按钮,默认用 antd 浅色主题的深色文字,在深色头部几乎看不见。
+   这里给它们一个明确的浅色,悬停再提亮并加个淡底。 */
+.chat-actions .ant-btn-text {
+  color: var(--muted);
+}
+
+.chat-actions .ant-btn-text:hover,
+.chat-actions .ant-btn-text:focus {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-actions .ant-btn-text[disabled],
+.chat-actions .ant-btn-text[disabled]:hover {
+  color: var(--border);
+  background: transparent;
+}
+
+/* 历史会话下拉里的单项 */
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+}
+
+.session-item-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-item-meta {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-item-del {
+  flex: none;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.session-item-del:hover {
+  opacity: 1;
+}
+
 /* 次要按钮:清空历史、附加图片这类不该抢主操作注意力的 */
 button.ghost {
   padding: 4px 10px;
@@ -330,26 +393,28 @@ button.ghost:disabled {
 
 .composer {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 10px;
   border-top: 1px solid var(--border);
 }
 
-.composer button.attach {
-  padding: 0 10px;
-  height: 34px;
-  font-size: 15px;
+/* 附加按钮与输入框同高,好对齐 */
+.composer .attach {
+  flex: none;
 }
 
 .composer textarea {
   flex: 1;
+  /* 与 antd 默认按钮(32px)同高:单行输入,整条底栏对齐 */
+  height: 32px;
+  line-height: 20px;
   resize: none;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px;
+  padding: 5px 8px;
   font-family: inherit;
   font-size: 14px;
 }
@@ -357,25 +422,6 @@ button.ghost:disabled {
 .composer textarea:focus {
   outline: none;
   border-color: var(--accent);
-}
-
-.composer button {
-  padding: 0 16px;
-  background: var(--accent);
-  color: #11111b;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.composer button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.composer button.stop {
-  background: var(--err);
 }
 
 /* ---------- 步骤轨迹 ---------- */

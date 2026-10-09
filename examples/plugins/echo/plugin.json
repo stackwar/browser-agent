@@ -1,0 +1,19 @@
+{
+  "name": "example-echo",
+  "tools": [
+    {
+      "name": "echo",
+      "description": "回显传入的 text 参数,用于验证插件工具链路是否打通。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "要回显的文本" }
+        },
+        "required": ["text"]
+      },
+      "command": "python3",
+      "args": ["echo.py"],
+      "input": "stdin"
+    }
+  ]
+}

@@ -24,13 +24,73 @@ export interface StatusInfo {
   endpoint: string
 }
 
+/** 一个可选模型及其能力 */
+export interface ModelOption {
+  id: string
+  name: string
+  /** 是否读图 */
+  vision: boolean
+}
+
+/** 可持久化的应用设置 */
+export interface AppSettings {
+  /** 选中的模型 id;空串表示用环境变量 / 默认值 */
+  model: string
+  /** 与模型的往返轮次上限 */
+  maxTurns: number
+  /** DeepSeek API key;空串表示用环境变量 DEEPSEEK_API_KEY */
+  apiKey: string
+}
+
+/** 设置面板用:当前生效设置 + 可选模型列表 */
+export interface SettingsInfo {
+  /** 当前生效的模型 id */
+  model: string
+  maxTurns: number
+  models: ModelOption[]
+  /** 是否已配置 API key(设置里或环境变量)。不回传密钥本身。 */
+  hasApiKey: boolean
+}
+
+/** 已加载的插件工具信息(设置面板展示用) */
+export interface PluginToolInfo {
+  name: string
+  description: string
+  /** 来源插件(目录名) */
+  plugin: string
+}
+
 export interface SessionInfo {
-  /** 历史里的消息条数 */
+  /** 历史里的消息条数(当前活动会话) */
   messages: number
+  /** 当前活动会话 id */
+  activeId: string
   /** 当前模型 ID */
   model: string
   /** 当前模型是否读图 —— 决定 UI 是否放开附图入口 */
   vision: boolean
+}
+
+/** 会话列表项:给历史会话列表 UI 用的轻量元信息,不含消息体 */
+export interface SessionMeta {
+  id: string
+  /** 标题(取首条用户消息,空会话显示占位名) */
+  title: string
+  createdAt: number
+  updatedAt: number
+  /** 该会话的消息条数 */
+  messageCount: number
+}
+
+/**
+ * 用于展示的会话消息。
+ *
+ * 历史会话的 UI 回放从主进程存的模型消息里重建:只取 user / assistant 的文本,
+ * 工具调用、工具结果、截图都不展示(它们是执行细节,不是对话内容)。
+ */
+export interface SessionMessage {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 // ---------- 观察层 ----------
@@ -214,6 +274,8 @@ export interface ImageAttachment {
   mediaType: string
   /** base64(不含 data: 前缀) */
   data: string
+  /** 上传到对象存储后的公网链接;有则模型用它当 image_url,省去 base64 */
+  url?: string
 }
 
 export interface StartRunPayload {
@@ -254,12 +316,42 @@ export interface Api {
     onEvent: (cb: (event: RunEvent) => void) => () => void
   }
   session: {
-    /** 清空会话历史,下一条消息重新开始 */
+    /** 清空当前活动会话的历史 */
     clear: () => Promise<{ ok: boolean }>
-    /** 模型能力与历史长度,UI 据此决定是否允许附图 */
+    /** 模型能力、历史长度与当前活动会话 id */
     info: () => Promise<SessionInfo>
+    /** 历史会话列表(按最近更新排序) */
+    list: () => Promise<SessionMeta[]>
+    /** 新建一个空会话并切为活动,返回其元信息 */
+    create: () => Promise<SessionMeta>
+    /** 切换活动会话 */
+    activate: (id: string) => Promise<{ ok: boolean }>
+    /** 删除一个会话 */
+    remove: (id: string) => Promise<{ ok: boolean }>
+    /** 取某个会话用于回放展示的消息 */
+    transcript: (id: string) => Promise<SessionMessage[]>
   }
   status: {
     get: () => Promise<StatusInfo>
+  }
+  upload: {
+    /** 把图片上传到对象存储,返回公网链接(集成 cos-image-upload skill) */
+    image: (image: ImageAttachment) => Promise<{ url: string }>
+  }
+  settings: {
+    /** 当前生效设置 + 可选模型 */
+    get: () => Promise<SettingsInfo>
+    /** 更新设置(局部),返回更新后的生效设置 */
+    update: (patch: Partial<AppSettings>) => Promise<SettingsInfo>
+  }
+  plugins: {
+    /** 已加载的插件工具 */
+    list: () => Promise<PluginToolInfo[]>
+    /** 重新扫描插件目录并重载 */
+    reload: () => Promise<PluginToolInfo[]>
+    /** 在系统文件管理器里打开插件目录 */
+    openDir: () => Promise<{ path: string }>
+    /** 插件目录路径 */
+    dir: () => Promise<{ path: string }>
   }
 }

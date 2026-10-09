@@ -1,20 +1,32 @@
-import { app, BrowserWindow, ipcMain, webContents, type WebContents } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, webContents, type WebContents } from 'electron'
 import * as actions from './actions'
 import { captureScreenshot, snapshot } from './observe'
+import { uploadImage } from './upload'
+import { AVAILABLE_MODELS, hasApiKey, modelInfo } from './agent'
+import * as settings from './settings'
+import * as plugins from './plugins'
 import {
   abortRun,
+  activateSession,
   clearSession,
+  createSession,
   getControl,
   getRun,
   getSessionInfo,
+  getSessionTranscript,
   handBackControl,
+  listSessions,
+  removeSession,
   startRun,
   takeOverControl
 } from './run'
 import type {
   ActionPayload,
+  AppSettings,
   CdpTarget,
+  ImageAttachment,
   ScreenshotOptions,
+  SettingsInfo,
   SnapshotOptions,
   StartRunPayload
 } from '../shared/types'
@@ -33,17 +45,21 @@ import type {
  */
 
 let remoteDebuggingPort = 9222
+/** 外部调试端口是否已开启。默认不开 —— 见 index.ts 的说明(安全硬化)。 */
+let debugEnabled = false
 
 /** 必须在 app ready 之前调用,才能让远程调试端口生效。 */
 export function setRemoteDebuggingPort(port: number): void {
   remoteDebuggingPort = port
+  debugEnabled = true
   app.commandLine.appendSwitch('remote-debugging-port', String(port))
   // 仅监听本机,避免端口暴露到公网
   app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
 }
 
+/** 外部 CDP 端点;未开启时返回空串 */
 export function getRemoteDebuggingEndpoint(): string {
-  return `http://127.0.0.1:${remoteDebuggingPort}`
+  return debugEnabled ? `http://127.0.0.1:${remoteDebuggingPort}` : ''
 }
 
 function listTargets(): CdpTarget[] {
@@ -162,9 +178,40 @@ export function registerCdpHandlers(): void {
   // 会话层
   ipcMain.handle('session:clear', () => clearSession())
   ipcMain.handle('session:info', () => getSessionInfo())
+  ipcMain.handle('session:list', () => listSessions())
+  ipcMain.handle('session:create', () => createSession())
+  ipcMain.handle('session:activate', (_event, id: string) => activateSession(id))
+  ipcMain.handle('session:remove', (_event, id: string) => removeSession(id))
+  ipcMain.handle('session:transcript', (_event, id: string) => getSessionTranscript(id))
 
   ipcMain.handle('status:get', () => ({
-    debugPort: remoteDebuggingPort,
+    debugPort: debugEnabled ? remoteDebuggingPort : 0,
     endpoint: getRemoteDebuggingEndpoint()
   }))
+
+  // 图片上传(集成 cos-image-upload skill)
+  ipcMain.handle('upload:image', (_event, image: ImageAttachment) => uploadImage(image))
+
+  // 设置
+  const settingsInfo = (): SettingsInfo => ({
+    model: modelInfo().model,
+    maxTurns: settings.get().maxTurns,
+    models: AVAILABLE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })),
+    hasApiKey: hasApiKey()
+  })
+  ipcMain.handle('settings:get', () => settingsInfo())
+  ipcMain.handle('settings:update', (_event, patch: Partial<AppSettings>) => {
+    settings.update(patch)
+    return settingsInfo()
+  })
+
+  // 插件
+  ipcMain.handle('plugins:list', () => plugins.list())
+  ipcMain.handle('plugins:reload', () => plugins.reload())
+  ipcMain.handle('plugins:dir', () => ({ path: plugins.dir() }))
+  ipcMain.handle('plugins:openDir', async () => {
+    const path = plugins.dir()
+    await shell.openPath(path)
+    return { path }
+  })
 }

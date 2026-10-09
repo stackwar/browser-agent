@@ -19,7 +19,9 @@ export default function StatusBar({ targetId }: Props) {
     <footer className="status-bar">
       <span>内嵌内核: Chromium (Electron)</span>
       <span className="status-sep">·</span>
-      <span>CDP 端点: {status ? status.endpoint : '加载中…'}</span>
+      <span>
+        外部调试端口:{status ? (status.endpoint || '未开启') : '加载中…'}
+      </span>
       <span className="status-sep">·</span>
       <span>Agent target: {targetId ?? '未就绪'}</span>
     </footer>

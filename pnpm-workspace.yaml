@@ -4,3 +4,8 @@ allowBuilds:
   electron: true
   esbuild: true
   electron-winstaller: true
+
+# 修正 electron-builder 26.15.3 的依赖偏差:它用到 @electron/get 的
+# ElectronDownloadCacheMode,而 3.0.0 没导出该枚举 → 打包时 resolveCacheMode 崩。
+overrides:
+  "@electron/get": "3.1.0"

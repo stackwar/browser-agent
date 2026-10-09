@@ -21,7 +21,7 @@ const MIN_WIDTH = 280
 /** 再宽就没给浏览器留出可用空间了 */
 const MAX_WIDTH = 720
 
-const DEFAULT_WIDTH = 360
+const DEFAULT_WIDTH = 420
 
 /** 键盘调节时每次按键走多少像素 */
 const STEP = 16

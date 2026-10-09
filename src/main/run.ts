@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import { hasApiKey, modelInfo, runAgent } from './agent'
 import * as control from './control'
 import * as session from './session'
+import * as settings from './settings'
 import type {
   ControlState,
   ImageAttachment,
@@ -9,6 +10,8 @@ import type {
   RunState,
   RunStep,
   SessionInfo,
+  SessionMeta,
+  SessionMessage,
   StartRunPayload
 } from '../shared/types'
 
@@ -23,8 +26,8 @@ import type {
  * 变成可见的步骤流并处理中断。
  */
 
-/** 与模型的往返轮次上限。每轮模型可能调多个工具,所以实际步骤数会更多。 */
-const MAX_TURNS = 12
+/** 与模型的往返轮次上限的默认值。实际值可在设置里改(settings.maxTurns)。 */
+const DEFAULT_MAX_TURNS = 50
 /** run 保留上限,超出后丢弃最旧的已结束 run,避免长期运行内存无上限增长 */
 const MAX_RETAINED_RUNS = 20
 
@@ -153,7 +156,7 @@ async function planAndAct(
   return await runAgent(
     prompt,
     targetId,
-    MAX_TURNS,
+    settings.get().maxTurns || DEFAULT_MAX_TURNS,
     {
       signal,
       onAction: (title) => {
@@ -261,15 +264,59 @@ export function getRun(runId: string): RunState | null {
   return entry ? structuredClone(entry.state) : null
 }
 
-/** 清空会话历史 */
+/** 是否有 run 正在执行。切换/新建/删除会话期间若换掉活动会话,
+ *  在跑的 agent 会在 finally 里把消息并进「新的」活动会话,historial 就乱了。 */
+function hasRunningRun(): boolean {
+  for (const entry of runs.values()) {
+    if (entry.state.status === 'running') return true
+  }
+  return false
+}
+
+function assertIdle(): void {
+  if (hasRunningRun()) throw new Error('有任务正在执行,请先停止或等待完成再切换会话')
+}
+
+/** 清空当前活动会话历史 */
 export function clearSession(): { ok: boolean } {
+  assertIdle()
   session.clear()
   return { ok: true }
 }
 
-/** 会话信息:历史长度 + 当前模型能力 */
+/** 会话信息:当前活动会话历史长度 + 活动 id + 当前模型能力 */
 export function getSessionInfo(): SessionInfo {
-  return { messages: session.stats().messages, ...modelInfo() }
+  const { messages, activeId } = session.stats()
+  return { messages, activeId, ...modelInfo() }
+}
+
+/** 历史会话列表 */
+export function listSessions(): SessionMeta[] {
+  return session.list()
+}
+
+/** 新建会话并切为活动 */
+export function createSession(): SessionMeta {
+  assertIdle()
+  return session.create()
+}
+
+/** 切换活动会话 */
+export function activateSession(id: string): { ok: boolean } {
+  assertIdle()
+  return { ok: session.activate(id) }
+}
+
+/** 删除会话 */
+export function removeSession(id: string): { ok: boolean } {
+  assertIdle()
+  session.remove(id)
+  return { ok: true }
+}
+
+/** 取会话的展示用消息 */
+export function getSessionTranscript(id: string): SessionMessage[] {
+  return session.transcript(id)
 }
 
 /** 窗口全部关闭或应用退出时,别留下还在跑的 run */

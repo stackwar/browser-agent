@@ -1,4 +1,8 @@
+import { app } from 'electron'
+import { join } from 'path'
+import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
+import type { SessionMeta, SessionMessage } from '../shared/types'
 
 /**
  * 会话历史。让模型看得到前几轮聊了什么,「刚才那个链接」这种指代才有意义。
@@ -49,22 +53,110 @@ const MAX_IMAGE_MESSAGES = 1
  */
 const TOOL_RESULT_LIMIT = 200
 
-interface Session {
+interface StoredSession {
+  id: string
+  /** 标题:取首条用户消息,空会话为空串(列表里显示占位名) */
+  title: string
+  createdAt: number
+  updatedAt: number
   messages: ChatCompletionMessageParam[]
 }
 
-const sessions = new Map<string, Session>()
+interface Store {
+  activeId: string
+  /** 按创建顺序存,展示时再按 updatedAt 排序 */
+  sessions: StoredSession[]
+}
 
-/** 当前只有一个浏览器会话,留出 key 是为了以后多标签页各自一条历史 */
-const DEFAULT_KEY = 'default'
+/** 标题截断长度 */
+const TITLE_LIMIT = 40
 
-function get(key = DEFAULT_KEY): Session {
-  let s = sessions.get(key)
-  if (!s) {
-    s = { messages: [] }
-    sessions.set(key, s)
+let store: Store | null = null
+
+function storePath(): string {
+  // 打包后 userData 才是可写目录;放这里会随应用数据一起保留
+  return join(app.getPath('userData'), 'sessions.json')
+}
+
+function newSession(): StoredSession {
+  const now = Date.now()
+  return {
+    id: `sess-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    title: '',
+    createdAt: now,
+    updatedAt: now,
+    messages: []
   }
-  return s
+}
+
+/**
+ * 懒加载:首次访问时从磁盘读。读失败(文件不存在 / 损坏)就起一个全新的
+ * 单会话 store —— 持久化不该成为聊天的硬依赖,坏档不能让功能瘫掉。
+ */
+function load(): Store {
+  if (store) return store
+  try {
+    const raw = readFileSync(storePath(), 'utf-8')
+    const parsed = JSON.parse(raw) as Store
+    if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
+      // 活动 id 可能指向已不存在的会话,校正到第一个
+      if (!parsed.sessions.some((s) => s.id === parsed.activeId)) {
+        parsed.activeId = parsed.sessions[0].id
+      }
+      store = parsed
+      return store
+    }
+  } catch {
+    // 落到下面的全新 store
+  }
+  const first = newSession()
+  store = { activeId: first.id, sessions: [first] }
+  return store
+}
+
+/** 写盘。失败只告警,不抛 —— 见 load() 的理由。 */
+function persist(): void {
+  if (!store) return
+  try {
+    mkdirSync(app.getPath('userData'), { recursive: true })
+    writeFileSync(storePath(), JSON.stringify(store), 'utf-8')
+  } catch (err) {
+    console.warn('[session] 持久化失败:', err)
+  }
+}
+
+function active(): StoredSession {
+  const s = load()
+  return s.sessions.find((x) => x.id === s.activeId) ?? s.sessions[0]
+}
+
+/** 从消息里取首条用户文本做标题 */
+function deriveTitle(messages: ChatCompletionMessageParam[]): string {
+  for (const m of messages) {
+    if (m.role !== 'user') continue
+    const text =
+      typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content
+              .filter((p): p is { type: 'text'; text: string } => (p as { type?: string }).type === 'text')
+              .map((p) => p.text)
+              .join(' ')
+          : ''
+    const trimmed = text.trim()
+    if (trimmed) return trimmed.length > TITLE_LIMIT ? `${trimmed.slice(0, TITLE_LIMIT)}…` : trimmed
+  }
+  return ''
+}
+
+function toMeta(s: StoredSession): SessionMeta {
+  return {
+    id: s.id,
+    title: s.title || '新会话',
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    messageCount: s.messages.length
+  }
 }
 
 /**
@@ -206,23 +298,22 @@ function capImages(
   return out
 }
 
-/** 读取历史,作为新 run 的起点 */
-export function history(key = DEFAULT_KEY): ChatCompletionMessageParam[] {
-  return dropDanglingToolCalls(get(key).messages)
+/** 读取当前活动会话的历史,作为新 run 的起点 */
+export function history(): ChatCompletionMessageParam[] {
+  return dropDanglingToolCalls(active().messages)
 }
 
 /**
- * 把一个 run 产生的消息并入历史。
+ * 把一个 run 产生的消息并入当前活动会话。
  *
  * 传入的是该 run 的完整 messages(不含 system —— 它每次由 agent 重新加上,
  * 这样改系统提示立刻生效,不会被旧历史里的版本盖住)。
  */
 export function append(
   messages: ChatCompletionMessageParam[],
-  options: { keepUserImages?: boolean } = {},
-  key = DEFAULT_KEY
+  options: { keepUserImages?: boolean } = {}
 ): void {
-  const session = get(key)
+  const session = active()
 
   const condensed = messages
     .filter((m) => m.role !== 'system')
@@ -245,13 +336,97 @@ export function append(
   if (session.messages.length > MAX_MESSAGES) {
     session.messages = dropDanglingToolCalls(session.messages.slice(-MAX_MESSAGES))
   }
+
+  // 首条用户消息定标题
+  if (!session.title) session.title = deriveTitle(session.messages)
+  session.updatedAt = Date.now()
+  persist()
 }
 
-export function clear(key = DEFAULT_KEY): void {
-  sessions.delete(key)
+/** 清空当前活动会话(保留会话本身,标题一并重置) */
+export function clear(): void {
+  const session = active()
+  session.messages = []
+  session.title = ''
+  session.updatedAt = Date.now()
+  persist()
 }
 
-/** 给 UI 用的轻量信息 */
-export function stats(key = DEFAULT_KEY): { messages: number } {
-  return { messages: get(key).messages.length }
+/** 历史会话列表,按最近更新倒序 */
+export function list(): SessionMeta[] {
+  return load()
+    .sessions.slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .map(toMeta)
+}
+
+/** 新建会话并切为活动 */
+export function create(): SessionMeta {
+  const s = load()
+  const created = newSession()
+  s.sessions.push(created)
+  s.activeId = created.id
+  persist()
+  return toMeta(created)
+}
+
+/** 切换活动会话 */
+export function activate(id: string): boolean {
+  const s = load()
+  if (!s.sessions.some((x) => x.id === id)) return false
+  s.activeId = id
+  persist()
+  return true
+}
+
+/**
+ * 删除会话。删掉当前活动会话时,活动指针落到最近更新的那个;
+ * 全删光则自动起一个新空会话,保证永远有一个活动会话。
+ */
+export function remove(id: string): void {
+  const s = load()
+  s.sessions = s.sessions.filter((x) => x.id !== id)
+  if (s.sessions.length === 0) {
+    const fresh = newSession()
+    s.sessions.push(fresh)
+    s.activeId = fresh.id
+  } else if (s.activeId === id) {
+    s.activeId = [...s.sessions].sort((a, b) => b.updatedAt - a.updatedAt)[0].id
+  }
+  persist()
+}
+
+/**
+ * 取某会话用于展示回放的消息:只保留 user / assistant 的文本内容,
+ * 工具调用、工具结果、截图都不展示(它们是执行细节,不是对话)。
+ */
+export function transcript(id: string): SessionMessage[] {
+  const session = load().sessions.find((x) => x.id === id)
+  if (!session) return []
+  const out: SessionMessage[] = []
+  for (const m of session.messages) {
+    if (m.role === 'user') {
+      const text =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content
+                .filter((p): p is { type: 'text'; text: string } => (p as { type?: string }).type === 'text')
+                .map((p) => p.text)
+                .join('\n')
+            : ''
+      if (text.trim()) out.push({ role: 'user', content: text })
+    } else if (m.role === 'assistant') {
+      // 带 tool_calls 的 assistant 通常 content 为空,跳过;只回放有文字的那些
+      const text = typeof m.content === 'string' ? m.content : ''
+      if (text.trim()) out.push({ role: 'assistant', content: text })
+    }
+  }
+  return out
+}
+
+/** 给 UI 用的轻量信息:当前活动会话的消息数与 id */
+export function stats(): { messages: number; activeId: string } {
+  const s = load()
+  return { messages: active().messages.length, activeId: s.activeId }
 }

@@ -20,12 +20,52 @@ const MAX_COUNT = 4
 
 export interface PendingImage extends ImageAttachment {
   id: string
-  /** 本地预览用的 object URL */
+  /** 本地预览用的 object URL(清晰,但页面卸载即失效,不可持久化) */
   previewUrl: string
+  /** 降采样后的缩略图 data URL —— 小、可持久化,给会话卡片和历史回放用 */
+  thumbUrl: string
   bytes: number
 }
 
 let seq = 0
+
+/** 把图片画到 canvas 上降采样,导出小体积 JPEG data URL(给卡片/持久化用)。
+ *  640px 兼顾两头:卡片里 72px 显示绰绰有余,点开预览放大也还清晰,
+ *  而 JPEG 后通常几十 KB,localStorage 存得下几十张。 */
+function makeThumb(file: File, max = 640, quality = 0.72): Promise<string> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const img = new window.Image()
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, max / Math.max(img.width, img.height) || 1)
+        const w = Math.max(1, Math.round(img.width * scale))
+        const h = Math.max(1, Math.round(img.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          resolve('')
+          return
+        }
+        ctx.drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      } catch {
+        // 跨源/解码失败等:退回空串,卡片会退化成不显缩略图而非崩掉
+        resolve('')
+      } finally {
+        URL.revokeObjectURL(url)
+      }
+    }
+    // 解码失败也要收尾,别让 Promise 永远挂着
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve('')
+    }
+    img.src = url
+  })
+}
 
 /** FileReader 读出来的是 `data:<type>;base64,<payload>`,只要后半段 */
 function toBase64(file: File): Promise<string> {
@@ -67,6 +107,7 @@ export function useAttachments() {
             mediaType: file.type,
             data: await toBase64(file),
             previewUrl: URL.createObjectURL(file),
+            thumbUrl: await makeThumb(file),
             bytes: file.size
           } satisfies PendingImage
         } catch (err) {

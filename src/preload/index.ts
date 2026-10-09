@@ -49,10 +49,28 @@ const api: Api = {
   },
   session: {
     clear: () => ipcRenderer.invoke('session:clear'),
-    info: () => ipcRenderer.invoke('session:info')
+    info: () => ipcRenderer.invoke('session:info'),
+    list: () => ipcRenderer.invoke('session:list'),
+    create: () => ipcRenderer.invoke('session:create'),
+    activate: (id: string) => ipcRenderer.invoke('session:activate', id),
+    remove: (id: string) => ipcRenderer.invoke('session:remove', id),
+    transcript: (id: string) => ipcRenderer.invoke('session:transcript', id)
   },
   status: {
     get: () => ipcRenderer.invoke('status:get')
+  },
+  upload: {
+    image: (image) => ipcRenderer.invoke('upload:image', image)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    update: (patch) => ipcRenderer.invoke('settings:update', patch)
+  },
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    reload: () => ipcRenderer.invoke('plugins:reload'),
+    openDir: () => ipcRenderer.invoke('plugins:openDir'),
+    dir: () => ipcRenderer.invoke('plugins:dir')
   }
 }
 
