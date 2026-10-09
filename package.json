@@ -1,6 +1,6 @@
 {
   "name": "browser-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "桌面客户端:内嵌 Chromium 浏览器内核,通过 CDP 协议供 Agent 聊天式操作浏览器。",
   "main": "./out/main/index.js",
   "author": "",
