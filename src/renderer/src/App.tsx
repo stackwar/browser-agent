@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal } from 'antd'
 import ChatPanel from './components/ChatPanel'
 import BrowserPane from './components/BrowserPane'
@@ -20,8 +20,13 @@ export default function App() {
       .catch(() => applyTheme('dark'))
   }, [])
 
-  // 启动时检查更新:有新版本就提示去下载(清单缺失 / 网络失败则静默)
+  // 启动时检查更新:有新版本就提示去下载(清单缺失 / 网络失败则静默)。
+  // 开发态跳过(版本是占位 0.1.0,且 StrictMode 会重复触发);只执行一次。
+  const updateChecked = useRef(false)
   useEffect(() => {
+    if (import.meta.env.DEV) return
+    if (updateChecked.current) return
+    updateChecked.current = true
     void window.api.update
       .check()
       .then((info) => {

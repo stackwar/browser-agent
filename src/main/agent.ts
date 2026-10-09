@@ -38,10 +38,14 @@ const MAX_TOKENS = 8000
 
 /**
  * 可选模型及其能力。设置面板从这里列出可切换的模型。
- * 走聚水潭 aihub(OpenAI 兼容端点),qwen3.7-plus 支持工具调用与多模态读图。
+ * provider:供应商类型(1=Qwen,2=Doubao),决定请求头 provider_type。
+ * 走聚水潭 aihub(OpenAI 兼容),qwen3.7-plus 支持工具调用与多模态读图。
  */
 export const AVAILABLE_MODELS = [
-  { id: 'qwen3.7-plus', name: 'Qwen3.7-Plus', vision: true }
+  { id: 'qwen3.7-plus', name: 'Qwen3.7-Plus（通义千问）', vision: true, provider: 1 },
+  // ⚠️ 豆包模型 id 待确认:aihub 对所有常见命名都返回「不存在或无权访问」,
+  // 需换成账号实际可用的豆包模型 id(并确认该 key 有豆包权限)。
+  { id: 'doubao-pro-32k', name: '豆包 Doubao-Pro-32k', vision: false, provider: 2 }
 ] as const
 
 /**
@@ -118,17 +122,23 @@ export function hasApiKey(): boolean {
   return Boolean(apiKey())
 }
 
+/** 当前请求该带的 provider_type:环境变量优先,否则取当前模型在表里的 provider */
+function providerType(): string | undefined {
+  if (process.env.BROWSER_AGENT_PROVIDER_TYPE) return process.env.BROWSER_AGENT_PROVIDER_TYPE
+  const m = AVAILABLE_MODELS.find((x) => x.id === currentModel())
+  return m ? String(m.provider) : undefined
+}
+
 function createClient(): OpenAI {
+  const pt = providerType()
   return new OpenAI({
     apiKey: apiKey(),
     baseURL: process.env.BROWSER_AGENT_BASE_URL || process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL,
-    // aihub 的计费归属头(UsageType=2)。可用环境变量覆盖;provider_type 不传默认 Qwen。
+    // aihub 的计费归属头(UsageType=2);provider_type 决定走 Qwen(1) 还是 Doubao(2)
     defaultHeaders: {
       co_id: process.env.BROWSER_AGENT_CO_ID || '1',
       u_id: process.env.BROWSER_AGENT_U_ID || '1',
-      ...(process.env.BROWSER_AGENT_PROVIDER_TYPE
-        ? { provider_type: process.env.BROWSER_AGENT_PROVIDER_TYPE }
-        : {})
+      ...(pt ? { provider_type: pt } : {})
     }
   })
 }

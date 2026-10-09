@@ -22,6 +22,7 @@ import { loadMessages, removeMessages, saveMessages } from '../sessionStore'
 import StepList from './StepList'
 import CollapsibleSteps from './CollapsibleSteps'
 import SettingsModal from './SettingsModal'
+import AboutModal from './AboutModal'
 import TracePanel from './TracePanel'
 
 interface Message {
@@ -114,6 +115,7 @@ export default function ChatPanel({ targetId, width }: Props) {
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [view, setView] = useState<'chat' | 'trace'>('chat')
   const [menuTheme, setMenuTheme] = useState<'dark' | 'light'>('dark')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -485,10 +487,13 @@ export default function ChatPanel({ targetId, width }: Props) {
                   // 账户体系尚未接入,这里先只做入口
                   if (key === 'login') message.info('登录功能开发中')
                   else if (key === 'profile') message.info('个人中心开发中')
+                  else if (key === 'about') setAboutOpen(true)
                 }}
                 items={[
                   { key: 'login', label: '登录' },
-                  { key: 'profile', label: '个人中心' }
+                  { key: 'profile', label: '个人中心' },
+                  { type: 'divider' },
+                  { key: 'about', label: '关于' }
                 ]}
               />
             }
@@ -684,6 +689,8 @@ export default function ChatPanel({ targetId, width }: Props) {
           void window.api.settings.get().then((s) => setMenuTheme(s.theme))
         }}
       />
+
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </aside>
   )
 }
