@@ -44,6 +44,14 @@ const fmtTime = (ts: number): string => {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/**
+ * 把 http 图片链接升到 https。
+ *
+ * CSP 的 img-src 只放行 https/data/blob;历史(localStorage)里可能残留早期
+ * 存下的 http COS 链接 —— 直接渲染会被拦成裂图,这里统一升一下。data/blob 不受影响。
+ */
+const httpsify = (u: string): string => (u.startsWith('http://') ? `https://${u.slice(7)}` : u)
+
 /** run 的收尾文案:成功用 summary,中断和失败给明确提示 */
 function outcomeText(run: RunState): string {
   if (run.status === 'aborted') return '已停止。'
@@ -300,11 +308,12 @@ export default function ChatPanel({ targetId, width }: Props) {
       data: img.data,
       url: urls[i] ?? undefined
     }))
-    // 卡片缩略图:上传成功用 COS 公网链接(持久、省 localStorage);
-    // 失败退回本地缩略图 data URL,再不行用 object URL
-    const thumbs = pend.map((img, i) => ({
+    // 卡片缩略图用**本地**缩略图 data URL 显示,不用 COS 远程链接 ——
+    // 远程图受 CDN 防盗链 / Referer / 网络影响,渲染层里时好时坏;本地 data URL
+    // 必然能显示、也不吃网络。COS 链接只进模型载荷(images[].url,更省 token)。
+    const thumbs = pend.map((img) => ({
       id: img.id,
-      url: urls[i] ?? img.thumbUrl ?? img.previewUrl,
+      url: img.thumbUrl || img.previewUrl,
       name: img.name
     }))
     // 只发图片时气泡不显示占位文案,只展示图片;给模型的 prompt 仍另给默认指令
@@ -458,7 +467,7 @@ export default function ChatPanel({ targetId, width }: Props) {
                     {m.thumbs.map((t) => (
                       <Image
                         key={t.id}
-                        src={t.url}
+                        src={httpsify(t.url)}
                         alt={t.name}
                         title={t.name}
                         width={72}
