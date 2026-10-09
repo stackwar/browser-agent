@@ -77,6 +77,20 @@ export interface TraceEntry {
   runId: string
 }
 
+/** 检查更新结果 */
+export interface UpdateInfo {
+  currentVersion: string
+  latestVersion: string
+  /** 是否有可用新版本 */
+  hasUpdate: boolean
+  /** 新版本下载地址 */
+  url: string
+  /** 更新说明 */
+  notes: string
+  /** 检查失败时的错误(网络 / 清单缺失等);有则视作「未检测到更新」 */
+  error?: string
+}
+
 export interface SessionInfo {
   /** 历史里的消息条数(当前活动会话) */
   messages: number
@@ -391,5 +405,11 @@ export interface Api {
     get: (sessionId: string) => Promise<TraceEntry[]>
     /** 清空某会话的轨迹 */
     clear: (sessionId: string) => Promise<{ ok: boolean }>
+  }
+  update: {
+    /** 检查是否有新版本 */
+    check: () => Promise<UpdateInfo>
+    /** 打开下载地址(系统浏览器) */
+    openDownload: (url: string) => Promise<void>
   }
 }

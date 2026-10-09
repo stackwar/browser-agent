@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Modal } from 'antd'
 import ChatPanel from './components/ChatPanel'
 import BrowserPane from './components/BrowserPane'
 import StatusBar from './components/StatusBar'
@@ -17,6 +18,24 @@ export default function App() {
       .get()
       .then((info) => applyTheme(info.theme))
       .catch(() => applyTheme('dark'))
+  }, [])
+
+  // 启动时检查更新:有新版本就提示去下载(清单缺失 / 网络失败则静默)
+  useEffect(() => {
+    void window.api.update
+      .check()
+      .then((info) => {
+        if (info.hasUpdate && info.url) {
+          Modal.confirm({
+            title: `发现新版本 ${info.latestVersion}`,
+            content: info.notes || `当前版本 ${info.currentVersion},有新版本可用。`,
+            okText: '前往下载',
+            cancelText: '以后再说',
+            onOk: () => window.api.update.openDownload(info.url)
+          })
+        }
+      })
+      .catch(() => void 0)
   }, [])
 
   return (

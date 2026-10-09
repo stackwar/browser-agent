@@ -75,6 +75,10 @@ const api: Api = {
   trace: {
     get: (sessionId: string) => ipcRenderer.invoke('trace:get', sessionId),
     clear: (sessionId: string) => ipcRenderer.invoke('trace:clear', sessionId)
+  },
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    openDownload: (url: string) => ipcRenderer.invoke('update:open', url)
   }
 }
 

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, webContents, type WebContents } fro
 import * as actions from './actions'
 import { captureScreenshot, snapshot } from './observe'
 import { uploadImage } from './upload'
+import { checkForUpdate, openDownload } from './update'
 import { AVAILABLE_MODELS, hasApiKey, modelInfo } from './agent'
 import * as settings from './settings'
 import * as plugins from './plugins'
@@ -221,4 +222,8 @@ export function registerCdpHandlers(): void {
   // 执行轨迹
   ipcMain.handle('trace:get', (_event, sessionId: string) => getTrace(sessionId))
   ipcMain.handle('trace:clear', (_event, sessionId: string) => clearTrace(sessionId))
+
+  // 检查更新
+  ipcMain.handle('update:check', () => checkForUpdate())
+  ipcMain.handle('update:open', (_event, url: string) => openDownload(url))
 }

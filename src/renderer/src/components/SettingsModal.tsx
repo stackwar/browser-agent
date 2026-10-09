@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button, Input, InputNumber, List, Modal, Radio, Segmented, Space, Tabs, Tag, Tooltip, message } from 'antd'
 import { FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons'
-import type { ModelOption, PluginToolInfo } from '@shared/types'
+import type { ModelOption, PluginToolInfo, UpdateInfo } from '@shared/types'
 import { applyTheme } from '../theme'
 
 interface Props {
@@ -29,6 +29,8 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
   const [plugins, setPlugins] = useState<PluginToolInfo[]>([])
   const [pluginDir, setPluginDir] = useState<string>('')
   const [reloading, setReloading] = useState(false)
+  const [upd, setUpd] = useState<UpdateInfo | null>(null)
+  const [checking, setChecking] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
     const [info, list, d] = await Promise.all([
@@ -44,6 +46,20 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
     setApiKey('') // 不回显密钥;留空表示不改动
     setPlugins(list)
     setPluginDir(d.path)
+    void window.api.update.check().then(setUpd).catch(() => void 0)
+  }, [])
+
+  const checkUpdate = useCallback(async (): Promise<void> => {
+    setChecking(true)
+    try {
+      const info = await window.api.update.check()
+      setUpd(info)
+      if (info.hasUpdate) message.info(`发现新版本 v${info.latestVersion}`)
+      else if (info.error) message.warning('检查更新失败,请稍后再试')
+      else message.success(`已是最新版本 v${info.currentVersion}`)
+    } finally {
+      setChecking(false)
+    }
   }, [])
 
   // 打开时拉取当前设置与插件
@@ -179,6 +195,31 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
                   <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
                     一次任务里与模型往返的上限。调高能处理更复杂的任务,但失控时更费 token。
                   </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: 6 }}>版本与更新</div>
+                  <Space>
+                    <span>当前版本 v{upd?.currentVersion ?? '—'}</span>
+                    <Button size="small" loading={checking} onClick={() => void checkUpdate()}>
+                      检查更新
+                    </Button>
+                    {upd?.hasUpdate && <Tag color="green">有新版本 v{upd.latestVersion}</Tag>}
+                  </Space>
+                  {upd?.hasUpdate && upd.url && (
+                    <div style={{ marginTop: 6 }}>
+                      <Button
+                        size="small"
+                        type="link"
+                        style={{ padding: 0 }}
+                        onClick={() => void window.api.update.openDownload(upd.url)}
+                      >
+                        前往下载
+                      </Button>
+                      {upd.notes && (
+                        <div style={{ color: '#999', fontSize: 12 }}>{upd.notes}</div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </Space>
             )
