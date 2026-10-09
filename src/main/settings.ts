@@ -10,7 +10,7 @@ import type { AppSettings } from '../shared/types'
  * 环境变量 BROWSER_AGENT_MODEL 或内置默认值 —— 这样没点过设置的用户行为不变。
  */
 
-const DEFAULTS: AppSettings = { model: '', maxTurns: 50, apiKey: '' }
+const DEFAULTS: AppSettings = { model: '', maxTurns: 50, apiKey: '', theme: 'dark' }
 
 let cache: AppSettings | null = null
 
@@ -38,6 +38,7 @@ export function update(patch: Partial<AppSettings>): AppSettings {
   // maxTurns 兜底:别让 UI 传来 0 / 负数 / 非数把 run 卡死
   if (!Number.isFinite(next.maxTurns) || next.maxTurns < 1) next.maxTurns = DEFAULTS.maxTurns
   next.maxTurns = Math.min(200, Math.round(next.maxTurns))
+  if (next.theme !== 'light' && next.theme !== 'dark') next.theme = DEFAULTS.theme
   cache = next
   try {
     mkdirSync(app.getPath('userData'), { recursive: true })

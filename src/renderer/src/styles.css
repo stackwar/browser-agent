@@ -715,3 +715,396 @@ button.ghost:disabled {
 .status-sep {
   color: var(--border);
 }
+
+/* ===================== 科技感增强(视觉 + 动效) ===================== */
+
+:root {
+  --accent2: #74c7ec;
+  --glow: rgba(137, 180, 250, 0.5);
+  --grad: linear-gradient(135deg, var(--accent), var(--accent2));
+}
+
+/* 背景:深色基底叠两道极淡辉光,营造纵深 */
+body {
+  background:
+    radial-gradient(1100px 560px at 8% -12%, rgba(137, 180, 250, 0.1), transparent 60%),
+    radial-gradient(900px 480px at 112% 8%, rgba(116, 199, 236, 0.08), transparent 55%),
+    var(--bg);
+}
+
+/* 聊天面板:竖向辉光描边,与右侧分层 */
+.chat-panel {
+  background: linear-gradient(180deg, rgba(137, 180, 250, 0.04), transparent 160px), var(--panel);
+  box-shadow: 1px 0 0 rgba(137, 180, 250, 0.06);
+}
+
+/* 头部:顶部渐隐 + 底部一条流动扫描线 */
+.chat-header {
+  background: linear-gradient(180deg, rgba(137, 180, 250, 0.07), transparent);
+  position: relative;
+}
+.chat-header::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+  background-size: 200% 100%;
+  animation: ba-scan 6s linear infinite;
+  opacity: 0.7;
+}
+
+/* 标题:渐变描字 */
+.chat-title {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* 消息进场动效 */
+.msg {
+  animation: ba-rise 0.28s ease both;
+}
+
+/* 气泡:细辉光边 + 投影,玻璃感 */
+.bubble {
+  border: 1px solid rgba(137, 180, 250, 0.1);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.7);
+}
+.msg.assistant .bubble {
+  border-color: rgba(137, 180, 250, 0.16);
+}
+.msg.user .bubble {
+  border-color: rgba(137, 180, 250, 0.24);
+}
+
+/* 输入框聚焦辉光 */
+.composer textarea:focus,
+.url-input:focus,
+.control-note:focus {
+  box-shadow:
+    0 0 0 2px rgba(137, 180, 250, 0.25),
+    0 0 18px -6px var(--glow);
+}
+
+/* 主按钮辉光(发送 / 新建会话等) */
+.ant-btn-primary {
+  box-shadow: 0 6px 18px -8px var(--glow);
+}
+.ant-btn-primary:hover {
+  box-shadow: 0 8px 22px -6px var(--glow);
+}
+
+/* 分隔条悬停辉光 */
+.splitter:hover,
+.splitter:focus-visible {
+  box-shadow: 0 0 10px 1px var(--glow);
+}
+
+/* 滚动条:霓虹细条 */
+.messages::-webkit-scrollbar {
+  width: 8px;
+}
+.messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+.messages::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--accent), var(--accent2));
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+/* 运行中步骤图标辉光 */
+.step.running .step-icon {
+  text-shadow: 0 0 8px var(--glow);
+}
+
+/* 控制遮罩里的脉冲点加辉光 */
+.control-dot {
+  box-shadow: 0 0 10px 1px var(--glow);
+}
+
+/* 状态栏:顶部极淡辉光线 */
+.status-bar {
+  background: linear-gradient(0deg, rgba(137, 180, 250, 0.05), transparent), var(--panel);
+}
+
+@keyframes ba-scan {
+  to {
+    background-position: 200% 0;
+  }
+}
+@keyframes ba-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 尊重系统的「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-header::after {
+    animation: none;
+  }
+  .msg {
+    animation: none;
+  }
+}
+
+/* ===================== 浅色模式 ===================== */
+:root[data-theme='light'] {
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --border: #e2e6ef;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --accent: #3b82f6;
+  --accent2: #06b6d4;
+  --user: #e4edff;
+  --assistant: #f1f3f8;
+  --ok: #16a34a;
+  --err: #dc2626;
+  --warn: #d97706;
+  --glow: rgba(59, 130, 246, 0.35);
+}
+
+/* 浅色下背景辉光改用蓝/青的浅色调,别用深色主题那两道 */
+:root[data-theme='light'] body {
+  background:
+    radial-gradient(1100px 560px at 8% -12%, rgba(59, 130, 246, 0.08), transparent 60%),
+    radial-gradient(900px 480px at 112% 8%, rgba(6, 182, 212, 0.07), transparent 55%),
+    var(--bg);
+}
+
+/* 浅色下气泡边框和投影收一点,避免发灰 */
+:root[data-theme='light'] .bubble {
+  border-color: rgba(59, 130, 246, 0.14);
+  box-shadow: 0 8px 24px -18px rgba(31, 41, 64, 0.4);
+}
+:root[data-theme='light'] .msg.user .bubble {
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+/* 流式输出:文字末尾一个闪烁光标 */
+.bubble-text.streaming::after {
+  content: '▋';
+  margin-left: 1px;
+  color: var(--accent);
+  animation: ba-blink 1s steps(2, start) infinite;
+}
+@keyframes ba-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-text.streaming::after {
+    animation: none;
+  }
+}
+
+/* ===================== 对话/轨迹 Tab + 轨迹视图 ===================== */
+.panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-tab {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.panel-tab:hover {
+  color: var(--text);
+}
+.panel-tab.active {
+  color: var(--text);
+  background: rgba(137, 180, 250, 0.14);
+  font-weight: 600;
+}
+
+.trace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.trace-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.trace-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 8px;
+}
+.trace-turn {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 10px 0 4px;
+  padding-left: 2px;
+}
+.trace-row {
+  display: flex;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.trace-row:hover {
+  background: rgba(137, 180, 250, 0.06);
+}
+.trace-badge {
+  flex: none;
+  align-self: flex-start;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.badge-system {
+  background: #475569;
+  color: #fff;
+}
+.badge-user {
+  background: var(--accent);
+  color: #11111b;
+}
+.badge-context {
+  background: #6b5bd2;
+  color: #fff;
+}
+.badge-assistant {
+  background: var(--assistant);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.badge-tool {
+  background: var(--warn);
+  color: #11111b;
+}
+.trace-content {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+/* markdown 行:交给 markdown 自己排版,收紧段落间距 */
+.trace-content.trace-md {
+  white-space: normal;
+}
+.trace-md > *:first-child {
+  margin-top: 0;
+}
+.trace-md > *:last-child {
+  margin-bottom: 0;
+}
+.trace-md p {
+  margin: 0 0 4px;
+}
+.trace-md ul,
+.trace-md ol {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+.trace-md pre {
+  margin: 4px 0;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.trace-md code {
+  font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+  font-size: 0.92em;
+}
+.trace-tool-name {
+  color: var(--accent2);
+  font-weight: 600;
+}
+.trace-tool-args,
+.trace-arrow,
+.trace-tool-result {
+  color: var(--muted);
+}
+
+/* 会话卡片里折叠的「思考与操作明细」 */
+.steps-collapsible {
+  margin-bottom: 6px;
+}
+.steps-toggle {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.steps-toggle:hover {
+  color: var(--text);
+}
+
+/* ===================== 文档附件 chip ===================== */
+.file-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+.bubble-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-chip.removable {
+  padding-right: 4px;
+}
+.file-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.file-chip-remove:hover {
+  color: var(--err);
+}

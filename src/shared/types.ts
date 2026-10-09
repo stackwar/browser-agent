@@ -40,6 +40,8 @@ export interface AppSettings {
   maxTurns: number
   /** DeepSeek API key;空串表示用环境变量 DEEPSEEK_API_KEY */
   apiKey: string
+  /** 界面主题 */
+  theme: 'dark' | 'light'
 }
 
 /** 设置面板用:当前生效设置 + 可选模型列表 */
@@ -50,6 +52,8 @@ export interface SettingsInfo {
   models: ModelOption[]
   /** 是否已配置 API key(设置里或环境变量)。不回传密钥本身。 */
   hasApiKey: boolean
+  /** 界面主题 */
+  theme: 'dark' | 'light'
 }
 
 /** 已加载的插件工具信息(设置面板展示用) */
@@ -58,6 +62,19 @@ export interface PluginToolInfo {
   description: string
   /** 来源插件(目录名) */
   plugin: string
+}
+
+/** 轨迹里一行:对应一条模型消息或一次工具调用 */
+export interface TraceEntry {
+  role: 'system' | 'user' | 'context' | 'assistant' | 'tool'
+  /** 文本内容(system/user/context/assistant 用) */
+  content: string
+  /** 工具调用(role=tool 时):名称、入参、返回 */
+  tool?: { name: string; args: string; result: string }
+  /** 属于第几轮(从 1 起;同一次 run 内自增) */
+  turn: number
+  /** 所属 run */
+  runId: string
 }
 
 export interface SessionInfo {
@@ -263,6 +280,7 @@ export type RunEvent =
   | { type: 'step-started'; runId: string; step: RunStep }
   | { type: 'step-note'; runId: string; index: number; note: string }
   | { type: 'step-finished'; runId: string; step: RunStep }
+  | { type: 'assistant-delta'; runId: string; text: string }
   | { type: 'run-finished'; runId: string; run: RunState }
   | { type: 'control-changed'; runId: string | null; control: ControlState }
 
@@ -283,6 +301,20 @@ export interface StartRunPayload {
   targetId: number
   /** 用户附带的图片。模型不读图时会被忽略并在 UI 里说明。 */
   images?: ImageAttachment[]
+  /** 用户附带的文档(pdf/excel/word/文本等),主进程解析为文本后并入消息 */
+  files?: FileAttachment[]
+}
+
+/** 用户附带的文档文件(非图片)。主进程解析为文本喂给模型。 */
+export interface FileAttachment {
+  /** 文件名 */
+  name: string
+  /** MIME 类型(可能为空,按扩展名兜底) */
+  mediaType: string
+  /** base64(不含 data: 前缀) */
+  data: string
+  /** 字节数,仅用于 UI 展示 */
+  size: number
 }
 
 // ---------- preload 暴露的 API ----------
@@ -353,5 +385,11 @@ export interface Api {
     openDir: () => Promise<{ path: string }>
     /** 插件目录路径 */
     dir: () => Promise<{ path: string }>
+  }
+  trace: {
+    /** 取某会话的完整执行轨迹(本次应用运行期间产生的) */
+    get: (sessionId: string) => Promise<TraceEntry[]>
+    /** 清空某会话的轨迹 */
+    clear: (sessionId: string) => Promise<{ ok: boolean }>
   }
 }

@@ -1,10 +1,14 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
+import { writeFile } from 'fs/promises'
+import { join } from 'path'
 import { hasApiKey, modelInfo, runAgent } from './agent'
 import * as control from './control'
 import * as session from './session'
 import * as settings from './settings'
+import * as trace from './trace'
 import type {
   ControlState,
+  FileAttachment,
   ImageAttachment,
   RunEvent,
   RunState,
@@ -12,7 +16,8 @@ import type {
   SessionInfo,
   SessionMeta,
   SessionMessage,
-  StartRunPayload
+  StartRunPayload,
+  TraceEntry
 } from '../shared/types'
 
 /**
@@ -36,6 +41,8 @@ interface RunEntry {
   controller: AbortController
   /** 图片只在执行期间用,不进 RunState —— base64 太大,不该被 clone 到渲染层 */
   images: ImageAttachment[]
+  /** 附件文档同理,只在执行期间用 */
+  files: FileAttachment[]
 }
 
 const runs = new Map<string, RunEntry>()
@@ -144,8 +151,10 @@ async function planAndAct(
   prompt: string,
   targetId: number,
   recorder: StepRecorder,
+  runId: string,
   signal: AbortSignal,
-  images: ImageAttachment[]
+  images: ImageAttachment[],
+  files: FileAttachment[]
 ): Promise<string> {
   if (!hasApiKey()) {
     throw new Error(
@@ -171,24 +180,55 @@ async function planAndAct(
         if (!recorder.isOpen()) recorder.start('思考')
         recorder.note(text)
         recorder.finish('done')
+      },
+      // 流式分片:边生成边推给渲染层做即时预览(最终仍由 onText 定格成步骤)
+      onDelta: (text) => emit({ type: 'assistant-delta', runId, text }),
+      // 本次 run 的完整轨迹:填上 runId、归到当前活动会话
+      onTrace: (entries) => {
+        const sid = session.stats().activeId
+        trace.append(
+          sid,
+          entries.map((e) => ({ ...e, runId }))
+        )
+      },
+      // agent 要操作浏览器时才锁浏览器(惰性,幂等)
+      onBrowserControl: () => control.beginRun(runId),
+      // 导出文件:弹原生保存框让用户选位置,写入后把结果告诉模型
+      onExport: async (file) => {
+        const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+        const defaultPath = join(app.getPath('downloads'), file.filename)
+        const result = win
+          ? await dialog.showSaveDialog(win, { defaultPath })
+          : await dialog.showSaveDialog({ defaultPath })
+        if (result.canceled || !result.filePath) return '用户取消了保存。'
+        const buf = file.base64
+          ? Buffer.from(file.content, 'base64')
+          : Buffer.from(file.content, 'utf-8')
+        await writeFile(result.filePath, buf)
+        return `已保存到:${result.filePath}`
       }
     },
-    images
+    images,
+    files
   )
 }
 
 async function execute(entry: RunEntry): Promise<void> {
   const { state, controller } = entry
   const recorder = new StepRecorder(state.id, state)
-  control.beginRun(state.id)
+  // 不在这里 beginRun —— 控制权惰性获取:只有当 agent 真的要操作浏览器
+  // (navigate/click/type/scroll/go_back 或请求人工)时才锁浏览器、显示遮罩。
+  // 纯问答 / 只读(observe/read_text)的 run 不锁,不弹蒙层。
 
   try {
     const summary = await planAndAct(
       state.prompt,
       state.targetId,
       recorder,
+      state.id,
       controller.signal,
-      entry.images
+      entry.images,
+      entry.files
     )
     state.status = 'done'
     state.summary = summary
@@ -216,6 +256,9 @@ export function startRun(payload: StartRunPayload): { runId: string } {
 
   const images = Array.isArray(payload.images) ? payload.images : []
 
+  // 用用户真正的问题给会话定标题(首个问题;已有标题则不动)
+  session.setTitleFromPrompt(prompt)
+
   const id = `run-${Date.now()}-${runSeq++}`
   const state: RunState = {
     id,
@@ -226,7 +269,12 @@ export function startRun(payload: StartRunPayload): { runId: string } {
     steps: [],
     startedAt: Date.now()
   }
-  const entry: RunEntry = { state, controller: new AbortController(), images }
+  const entry: RunEntry = {
+    state,
+    controller: new AbortController(),
+    images,
+    files: Array.isArray(payload.files) ? payload.files : []
+  }
   runs.set(id, entry)
 
   emit({ type: 'run-started', runId: id, run: structuredClone(state) })
@@ -280,7 +328,19 @@ function assertIdle(): void {
 /** 清空当前活动会话历史 */
 export function clearSession(): { ok: boolean } {
   assertIdle()
+  trace.clear(session.stats().activeId)
   session.clear()
+  return { ok: true }
+}
+
+/** 取某会话的执行轨迹 */
+export function getTrace(sessionId: string): TraceEntry[] {
+  return trace.get(sessionId)
+}
+
+/** 清空某会话的执行轨迹 */
+export function clearTrace(sessionId: string): { ok: boolean } {
+  trace.clear(sessionId)
   return { ok: true }
 }
 
@@ -311,6 +371,7 @@ export function activateSession(id: string): { ok: boolean } {
 export function removeSession(id: string): { ok: boolean } {
   assertIdle()
   session.remove(id)
+  trace.clear(id)
   return { ok: true }
 }
 

@@ -4,7 +4,7 @@ import {
   ClearOutlined,
   DeleteOutlined,
   HistoryOutlined,
-  PictureOutlined,
+  PaperClipOutlined,
   PlusOutlined,
   SendOutlined,
   SettingOutlined,
@@ -14,12 +14,15 @@ import {
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components } from 'react-markdown'
-import type { ImageAttachment, RunState, RunStep, SessionMeta } from '@shared/types'
+import type { FileAttachment, ImageAttachment, RunState, RunStep, SessionMeta } from '@shared/types'
 import { useRun } from '../hooks/useRun'
 import { useAttachments } from '../hooks/useAttachments'
+import { useFiles } from '../hooks/useFiles'
 import { loadMessages, removeMessages, saveMessages } from '../sessionStore'
 import StepList from './StepList'
+import CollapsibleSteps from './CollapsibleSteps'
 import SettingsModal from './SettingsModal'
+import TracePanel from './TracePanel'
 
 interface Message {
   id: string
@@ -27,6 +30,8 @@ interface Message {
   content: string
   /** 用户消息附带的图片缩略图。只存 object URL,base64 发完就不留了。 */
   thumbs?: { id: string; url: string; name: string }[]
+  /** 用户消息附带的文档名单(仅展示名称) */
+  files?: { id: string; name: string }[]
   /** 助手消息附带的步骤轨迹快照(run 结束时定格) */
   steps?: RunStep[]
   status?: RunState['status']
@@ -100,14 +105,17 @@ export default function ChatPanel({ targetId, width }: Props) {
     { id: '0', role: 'assistant', content: GREETING }
   ])
   const [input, setInput] = useState('')
-  const { run, busy, start, abort, reset } = useRun()
+  const { run, busy, streamingText, start, abort, reset } = useRun()
   const attachments = useAttachments()
+  const docs = useFiles()
   const [vision, setVision] = useState(true)
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [view, setView] = useState<'chat' | 'trace'>('chat')
+  const [menuTheme, setMenuTheme] = useState<'dark' | 'light'>('dark')
   const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   // run 已被归档进消息列表,避免 StrictMode 下重复 effect 触发两次归档
@@ -132,7 +140,17 @@ export default function ChatPanel({ targetId, width }: Props) {
     sessionIdRef.current = id
     const local = loadMessages(id)
     if (local && local.length > 0) {
-      setMessages(local.map((m) => ({ id: m.id, role: m.role, content: m.content, thumbs: m.thumbs })))
+      setMessages(
+        local.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          thumbs: m.thumbs,
+          files: m.files,
+          steps: m.steps,
+          status: m.status
+        }))
+      )
       return
     }
     const items = await window.api.session.transcript(id)
@@ -188,7 +206,15 @@ export default function ChatPanel({ targetId, width }: Props) {
     if (!id) return
     saveMessages(
       id,
-      messages.map((m) => ({ id: m.id, role: m.role, content: m.content, thumbs: m.thumbs }))
+      messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        thumbs: m.thumbs,
+        files: m.files,
+        steps: m.steps,
+        status: m.status
+      }))
     )
   }, [messages])
 
@@ -228,6 +254,7 @@ export default function ChatPanel({ targetId, width }: Props) {
         setActiveId(info.activeId)
         setSessions(await window.api.session.list())
         await loadSession(info.activeId)
+        void window.api.settings.get().then((s) => setMenuTheme(s.theme))
       } catch {
         setVision(false)
       }
@@ -237,9 +264,13 @@ export default function ChatPanel({ targetId, width }: Props) {
   const pickFiles = useCallback(
     (list: FileList | null): void => {
       if (!list || list.length === 0) return
-      void attachments.add([...list].filter((f) => f.type.startsWith('image/')))
+      const arr = [...list]
+      const imgs = arr.filter((f) => f.type.startsWith('image/'))
+      const others = arr.filter((f) => !f.type.startsWith('image/'))
+      if (imgs.length > 0 && vision) void attachments.add(imgs)
+      if (others.length > 0) void docs.add(others)
     },
-    [attachments]
+    [attachments, docs, vision]
   )
 
   // 粘贴截图是最顺手的入口,优先支持。剪贴板里没图时不拦默认行为,
@@ -259,7 +290,7 @@ export default function ChatPanel({ targetId, width }: Props) {
     (e: React.DragEvent): void => {
       e.preventDefault()
       setDragging(false)
-      if (!vision || busy) return
+      if (busy) return
       pickFiles(e.dataTransfer.files)
     },
     [vision, busy, pickFiles]
@@ -277,8 +308,9 @@ export default function ChatPanel({ targetId, width }: Props) {
   const send = async (): Promise<void> => {
     const text = input.trim()
     const pend = attachments.images
-    // 只有图没有字也算一条有效消息 —— 「看看这张图」是常见用法
-    if ((!text && pend.length === 0) || busy || uploading) return
+    const pendFiles = docs.files
+    // 有字 / 有图 / 有文件,任一即可发送
+    if ((!text && pend.length === 0 && pendFiles.length === 0) || busy || uploading) return
 
     // 先把图片传到 COS(集成 cos-image-upload skill)。
     // 失败不致命:退回 base64 + 本地缩略图,功能照常。
@@ -316,42 +348,54 @@ export default function ChatPanel({ targetId, width }: Props) {
       url: img.thumbUrl || img.previewUrl,
       name: img.name
     }))
+    const fileChips = pendFiles.map((f) => ({ id: f.id, name: f.name }))
+    const filesPayload: FileAttachment[] = docs.payload()
     // 只发图片时气泡不显示占位文案,只展示图片;给模型的 prompt 仍另给默认指令
     const bubble = text
 
     if (targetId === null) {
       setMessages((m) => [
         ...m,
-        { id: nextId(), role: 'user', content: bubble, thumbs },
+        { id: nextId(), role: 'user', content: bubble, thumbs, files: fileChips },
         { id: nextId(), role: 'assistant', content: '浏览器还没准备好,等右侧页面加载完成后再试。' }
       ])
       setInput('')
       attachments.detach()
+      docs.clear()
       return
     }
 
-    setMessages((m) => [...m, { id: nextId(), role: 'user', content: bubble, thumbs }])
+    setMessages((m) => [...m, { id: nextId(), role: 'user', content: bubble, thumbs, files: fileChips }])
     setInput('')
     // 气泡用的是 COS 链接或缩略图 data URL(都已持久化);object URL 仅作兜底,
     // 可能还被引用,所以这里只摘掉待发列表、不主动释放。
     attachments.detach()
+    docs.clear()
 
     try {
-      await start({ prompt: text || '看看这些图片,按图片里的内容判断该做什么。', targetId, images })
+      await start({
+        prompt: text || '处理我上传的附件/图片,按其内容判断该做什么。',
+        targetId,
+        images,
+        files: filesPayload
+      })
+      void refreshSessions()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setMessages((m) => [...m, { id: nextId(), role: 'assistant', content: `启动失败:${msg}` }])
     }
   }
 
-  const canSend = targetId !== null && (input.trim().length > 0 || attachments.images.length > 0)
+  const canSend =
+    targetId !== null &&
+    (input.trim().length > 0 || attachments.images.length > 0 || docs.files.length > 0)
 
   return (
     <aside
       className={`chat-panel${dragging ? ' dropping' : ''}`}
       style={{ width }}
       onDragOver={(e) => {
-        if (!vision || busy) return
+        if (busy) return
         e.preventDefault()
         setDragging(true)
       }}
@@ -379,7 +423,7 @@ export default function ChatPanel({ targetId, width }: Props) {
             placement="bottomRight"
             overlay={
               <Menu
-                theme="dark"
+                theme={menuTheme}
                 selectedKeys={[activeId]}
                 onClick={({ key }) => void selectSession(String(key))}
                 items={
@@ -410,9 +454,9 @@ export default function ChatPanel({ targetId, width }: Props) {
               />
             }
           >
-            <Button size="small" icon={<HistoryOutlined />}>
-              历史会话
-            </Button>
+            <Tooltip title="历史会话">
+              <Button size="small" type="text" icon={<HistoryOutlined />} />
+            </Tooltip>
           </Dropdown>
           <Tooltip title="清空当前会话">
             <Button
@@ -436,7 +480,7 @@ export default function ChatPanel({ targetId, width }: Props) {
             placement="bottomRight"
             overlay={
               <Menu
-                theme="dark"
+                theme={menuTheme}
                 onClick={({ key }) => {
                   // 账户体系尚未接入,这里先只做入口
                   if (key === 'login') message.info('登录功能开发中')
@@ -456,11 +500,30 @@ export default function ChatPanel({ targetId, width }: Props) {
         </div>
       </header>
 
-      <div className="messages" ref={scrollRef}>
+      <div className="panel-tabs">
+        <button
+          className={`panel-tab${view === 'chat' ? ' active' : ''}`}
+          onClick={() => setView('chat')}
+        >
+          对话
+        </button>
+        <button
+          className={`panel-tab${view === 'trace' ? ' active' : ''}`}
+          onClick={() => setView('trace')}
+        >
+          轨迹
+        </button>
+      </div>
+
+      {view === 'trace' && <TracePanel sessionId={activeId} active={view === 'trace'} busy={busy} />}
+
+      {view === 'chat' && (
+        <>
+          <div className="messages" ref={scrollRef}>
         {messages.map((m) => (
           <div key={m.id} className={`msg ${m.role}`}>
             <div className={`bubble${m.status && m.status !== 'done' ? ` bubble-${m.status}` : ''}`}>
-              {m.steps && m.steps.length > 0 && <StepList steps={m.steps} />}
+              {m.steps && m.steps.length > 0 && <CollapsibleSteps steps={m.steps} />}
               {m.thumbs && m.thumbs.length > 0 && (
                 <div className="bubble-thumbs">
                   <Image.PreviewGroup>
@@ -479,6 +542,15 @@ export default function ChatPanel({ targetId, width }: Props) {
                   </Image.PreviewGroup>
                 </div>
               )}
+              {m.files && m.files.length > 0 && (
+                <div className="bubble-files">
+                  {m.files.map((f) => (
+                    <span key={f.id} className="file-chip" title={f.name}>
+                      📄 {f.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {m.content && (
                 <div className="bubble-text">
                   <Markdown>{m.content}</Markdown>
@@ -493,7 +565,14 @@ export default function ChatPanel({ targetId, width }: Props) {
           <div className="msg assistant">
             <div className="bubble">
               <StepList steps={run.steps} />
-              {run.steps.length === 0 && <div className="bubble-text">正在启动…</div>}
+              {streamingText && (
+                <div className="bubble-text streaming">
+                  <Markdown>{streamingText}</Markdown>
+                </div>
+              )}
+              {run.steps.length === 0 && !streamingText && (
+                <div className="bubble-text">正在启动…</div>
+              )}
             </div>
           </div>
         )}
@@ -516,13 +595,31 @@ export default function ChatPanel({ targetId, width }: Props) {
         </div>
       )}
 
+      {docs.files.length > 0 && (
+        <div className="file-tray">
+          {docs.files.map((f) => (
+            <span className="file-chip removable" key={f.id} title={`${f.name}(${kb(f.size)})`}>
+              📄 {f.name}
+              <button
+                className="file-chip-remove"
+                aria-label={`移除 ${f.name}`}
+                onClick={() => docs.remove(f.id)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {attachments.rejected && <div className="tray-note">{attachments.rejected}</div>}
+      {docs.rejected && <div className="tray-note">{docs.rejected}</div>}
 
       <div className="composer">
         <input
           ref={fileRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.txt,.md,.json,.log,.xml,.yaml,.yml,.html"
           multiple
           hidden
           onChange={(e) => {
@@ -531,14 +628,12 @@ export default function ChatPanel({ targetId, width }: Props) {
             e.target.value = ''
           }}
         />
-        <Tooltip
-          title={vision ? '附加图片(也可直接粘贴或拖入)' : '当前模型不支持读图,无法附加图片'}
-        >
+        <Tooltip title={vision ? '附加图片或文档(可粘贴/拖入)' : '附加文档(当前模型不读图)'}>
           <Button
             className="attach"
-            icon={<PictureOutlined />}
-            aria-label="附加图片"
-            disabled={busy || uploading || !vision || attachments.full}
+            icon={<PaperClipOutlined />}
+            aria-label="附加文件"
+            disabled={busy || uploading}
             onClick={() => fileRef.current?.click()}
           />
         </Tooltip>
@@ -573,6 +668,8 @@ export default function ChatPanel({ targetId, width }: Props) {
           </Button>
         )}
       </div>
+        </>
+      )}
 
       <SettingsModal
         open={settingsOpen}
@@ -583,6 +680,8 @@ export default function ChatPanel({ targetId, width }: Props) {
             .info()
             .then((info) => setVision(info.vision))
             .catch(() => void 0)
+          // 主题可能变了,下拉菜单跟随
+          void window.api.settings.get().then((s) => setMenuTheme(s.theme))
         }}
       />
     </aside>

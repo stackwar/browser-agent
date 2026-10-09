@@ -55,8 +55,9 @@ function notify(): void {
   for (const listener of listeners) listener(state)
 }
 
-/** run 开始:agent 取得控制权 */
+/** run 开始:agent 取得控制权。幂等 —— 已是本 run 的 agent 时直接返回,不重置状态 */
 export function beginRun(id: string): ControlState {
+  if (owner === 'agent' && runId === id) return snapshot()
   runId = id
   owner = 'agent'
   agentWaiting = false

@@ -9,12 +9,23 @@ import type { RunEvent, RunState, RunStep, StartRunPayload } from '@shared/types
  */
 export function useRun() {
   const [run, setRun] = useState<RunState | null>(null)
+  // 流式预览文本:模型正在生成的这段话,边收边显;收完/进入下一步就清掉
+  const [streamingText, setStreamingText] = useState('')
   // 事件回调里要读最新 runId,用 ref 避免把订阅做成依赖 run 的 effect
   const activeId = useRef<string | null>(null)
 
   useEffect(() => {
     const off = window.api.run.onEvent((event: RunEvent) => {
       if (event.runId !== activeId.current) return
+
+      if (event.type === 'assistant-delta') {
+        setStreamingText(event.text)
+        return
+      }
+      // 其它事件意味着这段话已定格成步骤或已进入下一步 —— 清掉预览,避免重复
+      if (event.type === 'step-started' || event.type === 'run-finished') {
+        setStreamingText('')
+      }
 
       setRun((prev) => {
         switch (event.type) {
@@ -75,11 +86,12 @@ export function useRun() {
   const reset = useCallback((): void => {
     activeId.current = null
     setRun(null)
+    setStreamingText('')
   }, [])
 
   const busy = run?.status === 'running'
 
-  return { run, busy, start, abort, reset }
+  return { run, busy, streamingText, start, abort, reset }
 }
 
 export type { RunState, RunStep }

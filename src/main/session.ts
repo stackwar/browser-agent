@@ -143,10 +143,29 @@ function deriveTitle(messages: ChatCompletionMessageParam[]): string {
               .map((p) => p.text)
               .join(' ')
           : ''
-    const trimmed = text.trim()
+    const trimmed = cleanForTitle(text)
     if (trimmed) return trimmed.length > TITLE_LIMIT ? `${trimmed.slice(0, TITLE_LIMIT)}…` : trimmed
   }
   return ''
+}
+
+/** 去掉并入用户消息的「【当前页面】…」行与「【附件:…】…」块,只留用户真正的问题 */
+function cleanForTitle(text: string): string {
+  return text
+    .replace(/^【当前页面】[^\n]*\n+/, '')
+    .replace(/【附件:[^\n]*\n[\s\S]*?(?:\n\n|$)/g, '')
+    .trim()
+}
+
+/** run 开始时用「干净的」用户 prompt 定标题(避免被页面上下文/附件前缀污染) */
+export function setTitleFromPrompt(prompt: string): void {
+  const s = active()
+  if (s.title) return
+  const t = prompt.trim()
+  if (!t) return
+  s.title = t.length > TITLE_LIMIT ? `${t.slice(0, TITLE_LIMIT)}…` : t
+  s.updatedAt = Date.now()
+  persist()
 }
 
 function toMeta(s: StoredSession): SessionMeta {

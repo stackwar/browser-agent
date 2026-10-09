@@ -10,7 +10,8 @@ import * as session from './session'
 import * as settings from './settings'
 import { getTool, listTools } from './tools'
 import { agentKnowledge } from './knowledge'
-import type { ImageAttachment, PageSnapshot } from '../shared/types'
+import { parseFiles } from './parsefile'
+import type { FileAttachment, ImageAttachment, PageSnapshot, TraceEntry } from '../shared/types'
 
 /**
  * LLM 接入层。整个模块只在主进程运行 —— API key 不进渲染层。
@@ -31,17 +32,16 @@ import type { ImageAttachment, PageSnapshot } from '../shared/types'
  * 消息交回去。system 提示不进历史 —— 每次重新拼上,改提示立刻生效。
  */
 
-const DEFAULT_MODEL = 'deepseek-flash'
-const DEFAULT_BASE_URL = 'https://api.deepseek.com'
+const DEFAULT_MODEL = 'qwen3.7-plus'
+const DEFAULT_BASE_URL = 'https://aihub.juxieyun.com/aihub-api/v1'
 const MAX_TOKENS = 8000
 
 /**
  * 可选模型及其能力。设置面板从这里列出可切换的模型。
- * DeepSeek 两个模型里只有 flash 读图(/models 的 input_modalities 含 image)。
+ * 走聚水潭 aihub(OpenAI 兼容端点),qwen3.7-plus 支持工具调用与多模态读图。
  */
 export const AVAILABLE_MODELS = [
-  { id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', vision: true },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', vision: false }
+  { id: 'qwen3.7-plus', name: 'Qwen3.7-Plus', vision: true }
 ] as const
 
 /**
@@ -59,9 +59,19 @@ const MAX_USER_IMAGES = 4
 /** 可接受的图片类型。GIF 只取首帧,但 DeepSeek 兼容端点接受它。 */
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
-/** 当前模型:设置面板选的 > 环境变量 > 内置默认 */
+/** 会改变页面 / 输入的动作:执行前才锁浏览器(显示遮罩)。observe/read_text 只读不锁。 */
+const ACTIVE_BROWSER_ACTIONS = new Set(['navigate', 'click', 'click_text', 'type', 'scroll', 'go_back'])
+
+/** 当前模型:设置面板选的 > 环境变量 > 内置默认。
+ *  只接受在 AVAILABLE_MODELS 里的值 —— 换过模型列表后,旧配置里失效的 model
+ *  (比如之前存的 deepseek-flash)会被忽略,回退到默认,避免发出去被 400。 */
 function currentModel(): string {
-  return settings.get().model || process.env.BROWSER_AGENT_MODEL || DEFAULT_MODEL
+  const ids = new Set<string>(AVAILABLE_MODELS.map((m) => m.id))
+  const chosen = settings.get().model
+  if (chosen && ids.has(chosen)) return chosen
+  const env = process.env.BROWSER_AGENT_MODEL
+  if (env && ids.has(env)) return env
+  return DEFAULT_MODEL
 }
 
 function supportsVision(model: string): boolean {
@@ -79,12 +89,29 @@ export interface AgentDeps {
   onAction: (title: string) => (note: string, failed?: boolean) => void
   /** 汇报模型的思考文本 */
   onText: (text: string) => void
+  /** 流式分片:当前这轮已累加的文本(用于边生成边显示),可选 */
+  onDelta?: (text: string) => void
+  /** 本次 run 结束时回传完整轨迹条目(供「轨迹」视图),可选 */
+  onTrace?: (entries: TraceEntry[]) => void
+  /** agent 即将操作浏览器(或请求人工)时调用,用于惰性锁定浏览器、显示遮罩,可选 */
+  onBrowserControl?: () => void
+  /** 导出文件供用户保存;返回给模型的结果说明(如已保存路径 / 用户取消),可选 */
+  onExport?: (file: { filename: string; content: string; base64?: boolean }) => Promise<string>
   signal: AbortSignal
 }
 
 /** 生效的 API key:设置里配的 > 环境变量 */
+/**
+ * 内置默认 API Key。**不写进源码**(避免提交到 git):
+ * - 开发态:项目根 .env 里的 BROWSER_AGENT_API_KEY(已 gitignore)
+ * - 打包后:随包的 resources/app.env(gitignore + extraResources),由 env.ts 载入 process.env
+ * 设置里填的会覆盖它。
+ */
+const DEFAULT_API_KEY = ''
+
+/** 生效的 API key:设置 > 环境变量 BROWSER_AGENT_API_KEY > 内置默认 */
 function apiKey(): string {
-  return settings.get().apiKey || process.env.DEEPSEEK_API_KEY || ''
+  return settings.get().apiKey || process.env.BROWSER_AGENT_API_KEY || DEFAULT_API_KEY
 }
 
 export function hasApiKey(): boolean {
@@ -94,7 +121,15 @@ export function hasApiKey(): boolean {
 function createClient(): OpenAI {
   return new OpenAI({
     apiKey: apiKey(),
-    baseURL: process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL
+    baseURL: process.env.BROWSER_AGENT_BASE_URL || process.env.DEEPSEEK_BASE_URL || DEFAULT_BASE_URL,
+    // aihub 的计费归属头(UsageType=2)。可用环境变量覆盖;provider_type 不传默认 Qwen。
+    defaultHeaders: {
+      co_id: process.env.BROWSER_AGENT_CO_ID || '1',
+      u_id: process.env.BROWSER_AGENT_U_ID || '1',
+      ...(process.env.BROWSER_AGENT_PROVIDER_TYPE
+        ? { provider_type: process.env.BROWSER_AGENT_PROVIDER_TYPE }
+        : {})
+    }
   })
 }
 
@@ -214,6 +249,51 @@ function buildTools(vision: boolean): ChatCompletionFunctionTool[] {
       }
     }
   },
+  {
+    type: 'function',
+    function: {
+      name: 'click_text',
+      description:
+        '按元素的可见文字直接点击。当 observe 的元素列表里**找不到**某个控件时用它 ——' +
+        '常见于自定义 / 非语义化组件(如页面顶部的「统计时间」时间范围选择器)。' +
+        'text 填你在页面上看到的那个控件的文字(尽量短而唯一,如「统计时间」或当前显示的日期)。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要点击元素的可见文字(短、唯一的片段最好)' },
+          nth: { type: 'number', description: '有多个匹配时点第几个(从 0 起),默认 0' }
+        },
+        required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'export_file',
+      description:
+        '生成一个文件供用户下载 / 保存。把你整理好的内容(CSV、文本、JSON、Markdown 报告等)' +
+        '通过它导出,会弹出保存对话框让用户选位置保存。适合「把结果导出成表格 / 文件」这类需求。',
+      parameters: {
+        type: 'object',
+        properties: {
+          filename: {
+            type: 'string',
+            description: '文件名,必须带扩展名,如「订单汇总.csv」「报告.md」'
+          },
+          content: {
+            type: 'string',
+            description: '文件的完整内容(文本)。CSV 用逗号分隔、换行分行;其它按对应格式。'
+          },
+          base64: {
+            type: 'boolean',
+            description: 'content 是否为 base64(用于二进制文件),默认 false'
+          }
+        },
+        required: ['filename', 'content']
+      }
+    }
+  },
   // 插件 / skill 注册进来的额外工具
   ...listTools().map((t) => ({
     type: 'function' as const,
@@ -239,8 +319,11 @@ function buildSystem(vision: boolean): string {
   return `你是一个浏览器操作助手,通过工具操作用户面前的浏览器来完成任务。
 
 工作方式:
+- **先对齐意图再动手**:需求含糊、范围不明(例如没说清是哪个店/时间段/哪种口径),或要做写操作 / 高危动作时,先用一句话复述你的理解、或问一个最关键的澄清问题,得到确认或补充后再执行;不要凭猜测就做大动作。信息已经足够、且是只读查询时,直接做,不必反复确认。
 - 先 observe 看清页面,再动作。每次页面变化(点击、导航、滚动)后都要重新 observe,因为元素编号会变。
 - click 和 type 的 index 必须来自最近一次 observe 的返回,不要沿用旧编号,也不要自己编。
+- **observe 列表里找不到的控件用 click_text 按文字点**:有些自定义 / 非语义化组件(典型:页面顶部的「统计时间」时间范围选择器)不会出现在 observe 的元素列表里,这时别硬凑 index,直接用 click_text 按它在页面上的可见文字点击。
+- **页面可滚动就滚动**:observe 结果显示「上方 / 下方有更多内容」(即页面有滚动条、当前只看到一屏)时,不要以为可视区就是全部。需要找某一项、读完整列表 / 表格、或确认某内容是否存在时,先用 scroll(down / bottom)翻到对应位置、每滚一屏重新 observe,直到看全或找到目标;翻页类列表则用翻页控件。
 - 需要理解页面写了什么(而不是有哪些可点的东西)时用 read_text。${visual}
 - 任务完成后,直接用文字回答用户,不要再调工具。
 - 遇到登录页、验证码、支付确认这类需要用户本人决定的环节,调用 request_manual 交给他处理,不要尝试代替用户操作。
@@ -316,6 +399,15 @@ async function runTool(
     }
     case 'click': {
       const msg = await actions.click(targetId, await needSnapshot(), Number(input.index))
+      const snap = await actions.observe(targetId)
+      return { content: `${msg}\n\n${snap.text}`, snapshot: snap }
+    }
+    case 'click_text': {
+      const msg = await actions.clickText(
+        targetId,
+        String(input.text ?? ''),
+        input.nth != null ? Number(input.nth) : 0
+      )
       const snap = await actions.observe(targetId)
       return { content: `${msg}\n\n${snap.text}`, snapshot: snap }
     }
@@ -396,6 +488,8 @@ function describeTool(name: string, input: Record<string, unknown>): string {
       return `导航到 ${input.url}`
     case 'click':
       return `点击元素 [${input.index}]`
+    case 'click_text':
+      return `按文字点击「${String(input.text ?? '').slice(0, 20)}」`
     case 'type':
       return `输入「${String(input.text ?? '').slice(0, 20)}」到 [${input.index}]${input.submit ? ' 并回车' : ''}`
     case 'scroll':
@@ -436,7 +530,8 @@ export async function runAgent(
   targetId: number,
   maxTurns: number,
   deps: AgentDeps,
-  rawImages: ImageAttachment[] = []
+  rawImages: ImageAttachment[] = [],
+  rawFiles: FileAttachment[] = []
 ): Promise<string> {
   const client = createClient()
   const model = currentModel()
@@ -457,14 +552,43 @@ export async function runAgent(
 
   // 历史在前,本轮用户消息在后。system 不进历史,每次现拼。
   const prior = session.history()
+
+  // 开场注入:先 observe 一次当前页面,模型不必空跑一轮就知道用户在哪;
+  // 顺带把这份快照设为 lastSnapshot,首个 click/type 不用再 observe。
+  // 页面没就绪就跳过,不影响后续。
+  let lastSnapshot: PageSnapshot | null = null
+  let pageContext = ''
+  try {
+    if (!deps.signal.aborted) {
+      const snap = await actions.observe(targetId)
+      lastSnapshot = snap
+      pageContext = `【当前页面】${snap.title || '(无标题)'} — ${snap.url}\n\n`
+    }
+  } catch {
+    // 页面未就绪 / 采集失败:忽略,模型需要时自己 observe
+  }
+
+  // 解析用户上传的文档(pdf/excel/word/文本等)为文本,并入本轮用户消息
+  let fileText = ''
+  if (rawFiles.length > 0) {
+    const label = rawFiles.map((f) => f.name).join('、')
+    const done = deps.onAction(`解析附件:${label}`)
+    try {
+      const parsed = await parseFiles(rawFiles)
+      if (parsed) fileText = `${parsed}\n\n`
+      done(`已解析 ${rawFiles.length} 个附件`)
+    } catch (err) {
+      done(err instanceof Error ? err.message : String(err), true)
+    }
+  }
+
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: buildSystem(vision) },
     ...prior,
-    buildUserMessage(prompt, images)
+    buildUserMessage(pageContext + fileText + prompt, images)
   ]
   // 本轮新增消息的起点:结束时只把这之后的部分并入历史,避免历史被重复累加
   const freshFrom = messages.length - 1
-  let lastSnapshot: PageSnapshot | null = null
   const replies: string[] = []
   /**
    * 用户接管后留下的说明,等下一条工具结果带给模型。
@@ -498,39 +622,66 @@ export async function runAgent(
         }
       }
 
-      const response = await client.chat.completions.create(
+      const stream = await client.chat.completions.create(
         {
           model,
           max_tokens: MAX_TOKENS,
           messages,
-          tools
+          tools,
+          // 流式输出:文字边生成边推给 UI,体感更快
+          stream: true,
+          stream_options: { include_usage: true }
           // tool_choice 保持默认 auto:强制调工具会让模型没法用文字收尾
         },
         // SDK 支持 AbortSignal,中断时能立刻取消在途请求而不用等它返回
         { signal: deps.signal }
       )
 
-      const choice = response.choices[0]
-      if (!choice) return '模型没有返回任何内容。'
-
-      const msg = choice.message
-
-      // 安全策略拦下请求时 content 为空、refusal 带说明
-      if (msg.refusal) {
-        messages.push({ role: 'assistant', content: `(拒绝回答)${msg.refusal}` })
-        return `模型拒绝了这个请求:${msg.refusal}`
+      // 累加流式分片:content 直接拼;tool_calls 按 index 累加(id/name/arguments 分片到达)
+      let streamedContent = ''
+      let streamedRefusal = ''
+      const toolAcc = new Map<number, { id: string; name: string; args: string }>()
+      for await (const chunk of stream) {
+        if (deps.signal.aborted) throw new AbortedError()
+        const delta = chunk.choices[0]?.delta
+        if (!delta) continue
+        if (typeof delta.content === 'string' && delta.content) {
+          streamedContent += delta.content
+          deps.onDelta?.(streamedContent)
+        }
+        const r = (delta as { refusal?: string | null }).refusal
+        if (typeof r === 'string') streamedRefusal += r
+        for (const tc of delta.tool_calls ?? []) {
+          const i = tc.index ?? 0
+          const slot = toolAcc.get(i) ?? { id: '', name: '', args: '' }
+          if (tc.id) slot.id = tc.id
+          if (tc.function?.name) slot.name = tc.function.name
+          if (tc.function?.arguments) slot.args += tc.function.arguments
+          toolAcc.set(i, slot)
+        }
       }
 
-      const text = typeof msg.content === 'string' ? msg.content.trim() : ''
+      // 安全策略拦下请求时 content 为空、refusal 带说明
+      if (streamedRefusal) {
+        messages.push({ role: 'assistant', content: `(拒绝回答)${streamedRefusal}` })
+        return `模型拒绝了这个请求:${streamedRefusal}`
+      }
+
+      const text = streamedContent.trim()
       if (text) {
         deps.onText(text)
         replies.push(text)
       }
 
-      // 只处理 function 类型的 tool_call;custom tool 我们没注册,不会出现
-      const toolCalls = (msg.tool_calls ?? []).filter(
-        (c): c is ChatCompletionMessageFunctionToolCall => c.type === 'function'
-      )
+      // 重建成与非流式一致的 tool_calls 形状,后续逻辑不变
+      const toolCalls: ChatCompletionMessageFunctionToolCall[] = [...toolAcc.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .filter(([, s]) => s.id && s.name)
+        .map(([, s]) => ({
+          id: s.id,
+          type: 'function' as const,
+          function: { name: s.name, arguments: s.args }
+        }))
 
       // 模型不再调工具,说明它认为任务结束
       if (toolCalls.length === 0) {
@@ -543,8 +694,8 @@ export async function runAgent(
       // 的 role:'tool' 消息会因为找不到对应的 tool_call_id 被拒。
       messages.push({
         role: 'assistant',
-        content: msg.content ?? '',
-        tool_calls: msg.tool_calls
+        content: streamedContent,
+        tool_calls: toolCalls
       })
 
       for (const call of toolCalls) {
@@ -570,6 +721,7 @@ export async function runAgent(
         if (call.function.name === 'request_manual') {
           const reason = String(input.reason ?? '需要你本人处理')
           const done = deps.onAction(`等待人工处理:${reason}`)
+          deps.onBrowserControl?.() // 请求人工 = 要动浏览器,先锁定本 run 的控制权
           control.requestManual(reason)
           try {
             const notes = await control.waitForTurn(deps.signal)
@@ -585,6 +737,29 @@ export async function runAgent(
           }
           continue
         }
+
+        // 导出文件供用户下载:不动浏览器,直接交给宿主弹保存框
+        if (call.function.name === 'export_file') {
+          const filename = String(input.filename ?? 'export.txt')
+          const content = String(input.content ?? '')
+          const base64 = input.base64 === true
+          const done = deps.onAction(`导出文件:${filename}`)
+          try {
+            const msg = deps.onExport
+              ? await deps.onExport({ filename, content, base64 })
+              : '当前环境不支持导出文件。'
+            done(msg)
+            pushResult(msg)
+          } catch (err) {
+            const m = err instanceof Error ? err.message : String(err)
+            done(m, true)
+            pushResult(`导出失败:${m}`)
+          }
+          continue
+        }
+
+        // 只有「会动页面/输入」的动作才锁浏览器(显示遮罩);observe/read_text 是只读,不锁。
+        if (ACTIVE_BROWSER_ACTIONS.has(call.function.name)) deps.onBrowserControl?.()
 
         // 每个动作之前让出一次控制权 —— 这是接管生效的边界
         const resumeNote = await yieldToManual(deps)
@@ -637,7 +812,90 @@ export async function runAgent(
       : `已达到 ${maxTurns} 轮上限,任务未完成。`
   } finally {
     session.append(messages.slice(freshFrom), { keepUserImages: vision })
+    // 回传本次 run 的完整轨迹(供「轨迹」视图);系统提示仅在会话首个 run 带上
+    if (deps.onTrace) {
+      try {
+        deps.onTrace(buildTrace(messages.slice(freshFrom)))
+      } catch {
+        /* 轨迹是增强,失败不影响主流程 */
+      }
+    }
   }
+}
+
+/** 文本化消息 content(string 或 parts 数组) */
+function traceText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => {
+        const part = p as { type?: string; text?: string }
+        if (part.type === 'text') return part.text ?? ''
+        if (part.type === 'image_url') return '[图片]'
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return ''
+}
+
+const traceTrunc = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s)
+
+/** 把一次 run 的消息转成轨迹条目:assistant 文本单列,tool_call 与其结果配对成一行。
+ *  不含 system 提示 —— 轨迹只回看对话与工具调用。 */
+function buildTrace(runMessages: ChatCompletionMessageParam[]): TraceEntry[] {
+  const out: TraceEntry[] = []
+  // tool_call_id → 结果文本
+  const results = new Map<string, string>()
+  for (const m of runMessages) {
+    if (m.role === 'tool') {
+      const id = (m as { tool_call_id?: string }).tool_call_id
+      if (id) results.set(id, traceText(m.content))
+    }
+  }
+  let turn = 0
+  for (const m of runMessages) {
+    if (m.role === 'user') {
+      const content = traceText(m.content)
+      const isCtx =
+        content.startsWith('【当前页面】') ||
+        content.startsWith(session.SCREENSHOT_NOTE) ||
+        content.includes('(此处有')
+      out.push({
+        role: isCtx ? 'context' : 'user',
+        content: traceTrunc(content, 1500),
+        turn: Math.max(1, turn),
+        runId: ''
+      })
+    } else if (m.role === 'assistant') {
+      turn++
+      const content = typeof m.content === 'string' ? m.content : ''
+      if (content.trim()) {
+        out.push({ role: 'assistant', content: traceTrunc(content, 2000), turn, runId: '' })
+      }
+      const calls = ('tool_calls' in m && m.tool_calls ? m.tool_calls : []) as {
+        id: string
+        type: string
+        function?: { name?: string; arguments?: string }
+      }[]
+      for (const c of calls) {
+        if (c.type !== 'function') continue
+        out.push({
+          role: 'tool',
+          content: '',
+          tool: {
+            name: c.function?.name ?? '',
+            args: traceTrunc(c.function?.arguments ?? '', 1000),
+            result: traceTrunc(results.get(c.id) ?? '', 1200)
+          },
+          turn,
+          runId: ''
+        })
+      }
+    }
+  }
+  return out
 }
 
 /**

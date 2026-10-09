@@ -9,11 +9,13 @@ import {
   abortRun,
   activateSession,
   clearSession,
+  clearTrace,
   createSession,
   getControl,
   getRun,
   getSessionInfo,
   getSessionTranscript,
+  getTrace,
   handBackControl,
   listSessions,
   removeSession,
@@ -197,7 +199,8 @@ export function registerCdpHandlers(): void {
     model: modelInfo().model,
     maxTurns: settings.get().maxTurns,
     models: AVAILABLE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })),
-    hasApiKey: hasApiKey()
+    hasApiKey: hasApiKey(),
+    theme: settings.get().theme
   })
   ipcMain.handle('settings:get', () => settingsInfo())
   ipcMain.handle('settings:update', (_event, patch: Partial<AppSettings>) => {
@@ -214,4 +217,8 @@ export function registerCdpHandlers(): void {
     await shell.openPath(path)
     return { path }
   })
+
+  // 执行轨迹
+  ipcMain.handle('trace:get', (_event, sessionId: string) => getTrace(sessionId))
+  ipcMain.handle('trace:clear', (_event, sessionId: string) => clearTrace(sessionId))
 }

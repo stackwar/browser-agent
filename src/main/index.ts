@@ -59,17 +59,29 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  // 开发态设置 Dock 图标(打包后用 .icns,无需这步)。build/icon.png 在项目根。
-  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
-    const iconPath = join(process.cwd(), 'build', 'icon.png')
-    if (existsSync(iconPath)) {
-      try {
-        app.dock.setIcon(iconPath)
-      } catch {
-        /* ignore */
-      }
+  // 开发态设置 Dock 图标(打包后用 .icns,无需这步)。多候选兜底不同 cwd。
+  const devIcon = [
+    join(process.cwd(), 'build', 'icon.png'),
+    join(__dirname, '../../build/icon.png'),
+    join(app.getAppPath(), 'build', 'icon.png')
+  ].find((p) => existsSync(p))
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock && devIcon) {
+    try {
+      app.dock.setIcon(devIcon)
+    } catch {
+      /* ignore */
     }
   }
+
+  // 「关于」面板:只显示聚运赢的名称/版本/图标,不带 Electron / Chromium 信息。
+  // 开发态 app.getVersion() 会返回 Electron 版本,这里固定用应用自身版本。
+  app.setAboutPanelOptions({
+    applicationName: '聚运赢',
+    applicationVersion: app.isPackaged ? app.getVersion() : '0.1.0',
+    version: '',
+    copyright: '© 聚水潭 · 聚运赢',
+    ...(devIcon ? { iconPath: devIcon } : {})
+  })
 
   registerCdpHandlers()
   // 加载插件目录里的扩展工具(命令型)。失败不影响启动。

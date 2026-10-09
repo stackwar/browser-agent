@@ -1,14 +1,23 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import ChatPanel from './components/ChatPanel'
 import BrowserPane from './components/BrowserPane'
 import StatusBar from './components/StatusBar'
 import { usePanelWidth } from './hooks/usePanelWidth'
+import { applyTheme } from './theme'
 
 export default function App() {
   // <webview> 的 webContents id:Agent 的 CDP target
   const [targetId, setTargetId] = useState<number | null>(null)
   const onTargetChange = useCallback((id: number | null) => setTargetId(id), [])
   const panel = usePanelWidth()
+
+  // 启动时按设置应用主题(默认深色)
+  useEffect(() => {
+    void window.api.settings
+      .get()
+      .then((info) => applyTheme(info.theme))
+      .catch(() => applyTheme('dark'))
+  }, [])
 
   return (
     // 拖动期间整棵树加 resizing:拿它屏掉 webview 的命中测试,

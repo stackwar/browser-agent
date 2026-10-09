@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button, Input, InputNumber, List, Modal, Radio, Space, Tabs, Tag, Tooltip, message } from 'antd'
+import { Button, Input, InputNumber, List, Modal, Radio, Segmented, Space, Tabs, Tag, Tooltip, message } from 'antd'
 import { FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ModelOption, PluginToolInfo } from '@shared/types'
+import { applyTheme } from '../theme'
 
 interface Props {
   open: boolean
@@ -22,6 +23,7 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
   const [maxTurns, setMaxTurns] = useState<number>(50)
   const [apiKey, setApiKey] = useState<string>('')
   const [hasApiKey, setHasApiKey] = useState<boolean>(false)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [saving, setSaving] = useState(false)
 
   const [plugins, setPlugins] = useState<PluginToolInfo[]>([])
@@ -38,6 +40,7 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
     setModel(info.model)
     setMaxTurns(info.maxTurns)
     setHasApiKey(info.hasApiKey)
+    setTheme(info.theme)
     setApiKey('') // 不回显密钥;留空表示不改动
     setPlugins(list)
     setPluginDir(d.path)
@@ -55,9 +58,11 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
       await window.api.settings.update({
         model,
         maxTurns,
+        theme,
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
       })
       message.success('设置已保存')
+      applyTheme(theme)
       onSaved()
       onClose()
     } catch (err) {
@@ -65,7 +70,15 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [model, maxTurns, apiKey, onSaved, onClose])
+  }, [model, maxTurns, apiKey, theme, onSaved, onClose])
+
+  const clearApiKey = useCallback(async (): Promise<void> => {
+    await window.api.settings.update({ apiKey: '' })
+    setApiKey('')
+    setHasApiKey(false)
+    message.success('已清除,改用环境变量 / 内置默认 key')
+    onSaved()
+  }, [onSaved])
 
   const reloadPlugins = useCallback(async (): Promise<void> => {
     setReloading(true)
@@ -124,17 +137,34 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
               <Space direction="vertical" size="middle" style={{ width: '100%' }}>
                 <div>
                   <div style={{ marginBottom: 6 }}>
-                    DeepSeek API Key {hasApiKey ? <Tag color="green">已配置</Tag> : <Tag color="red">未配置</Tag>}
+                    API Key {hasApiKey ? <Tag color="green">已配置</Tag> : <Tag color="red">未配置</Tag>}
                   </div>
-                  <Input.Password
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={hasApiKey ? '已配置,留空则不改动' : '粘贴 sk-… 后保存'}
-                    autoComplete="off"
-                  />
+                  <Space.Compact style={{ width: '100%' }}>
+                    <Input.Password
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={hasApiKey ? '已配置,留空则不改动' : '粘贴 sk-… 后保存'}
+                      autoComplete="off"
+                    />
+                    <Button onClick={() => void clearApiKey()}>清除</Button>
+                  </Space.Compact>
                   <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
                     保存在本机 settings.json,仅主进程调用模型时读取。也可用环境变量
-                    DEEPSEEK_API_KEY。
+                    BROWSER_AGENT_API_KEY。清除后回退到环境变量 / 内置默认。
+                  </div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: 6 }}>界面主题</div>
+                  <Segmented
+                    value={theme}
+                    onChange={(v) => setTheme(v as 'dark' | 'light')}
+                    options={[
+                      { label: '深色', value: 'dark' },
+                      { label: '浅色', value: 'light' }
+                    ]}
+                  />
+                  <div style={{ color: '#999', fontSize: 12, marginTop: 6 }}>
+                    保存后生效。
                   </div>
                 </div>
                 <div>

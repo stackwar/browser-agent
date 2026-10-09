@@ -5,6 +5,8 @@ directories:
 extraResources:
   - from: resources/cos-upload
     to: cos-upload
+  - from: resources/app.env
+    to: app.env
 files:
   - out/**
   - "!**/.vscode/*"

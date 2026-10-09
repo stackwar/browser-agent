@@ -71,6 +71,10 @@ const api: Api = {
     reload: () => ipcRenderer.invoke('plugins:reload'),
     openDir: () => ipcRenderer.invoke('plugins:openDir'),
     dir: () => ipcRenderer.invoke('plugins:dir')
+  },
+  trace: {
+    get: (sessionId: string) => ipcRenderer.invoke('trace:get', sessionId),
+    clear: (sessionId: string) => ipcRenderer.invoke('trace:clear', sessionId)
   }
 }
 

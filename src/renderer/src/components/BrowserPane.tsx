@@ -96,9 +96,6 @@ export default function BrowserPane({ onTargetChange }: Props) {
             if (e.key === 'Enter') go()
           }}
         />
-        <button onClick={go} disabled={locked}>
-          转到
-        </button>
       </div>
       <div className="webview-wrap">
         <webview ref={webviewRef} src={DEFAULT_URL} className="webview" />

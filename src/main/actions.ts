@@ -174,6 +174,68 @@ export async function click(targetId: number, snap: PageSnapshot, index: number)
   return `已点击 [${index}] ${el.role} "${el.name}"`
 }
 
+/**
+ * 按「可见文字」直接定位并点击元素。
+ *
+ * 用途:observe 的可交互元素列表只收语义化控件(role/input/[onclick]/[tabindex]…),
+ * ERP 里很多自定义组件(如顶部「统计时间」选择器)是没有这些标记的 div,observe
+ * 看不到、也就没有 index 可点。这个动作直接在 DOM 里按文字找最贴近的那个元素
+ *(叶子优先),滚动到可见后点它的中心,绕开 observe 的编号体系。
+ */
+export async function clickText(targetId: number, text: string, nth = 0): Promise<string> {
+  const wc = resolve(targetId)
+  const q = text.trim()
+  if (!q) throw new ActionError('click_text 需要一个非空的文字')
+
+  const expr = `(() => {
+    const q = ${JSON.stringify(q)};
+    const nth = ${Number.isFinite(nth) ? Math.max(0, Math.floor(nth)) : 0};
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const matches = [];
+    for (const el of document.querySelectorAll('*')) {
+      const t = norm(el.innerText || el.textContent);
+      if (!t || t.length > 80 || t.indexOf(q) < 0) continue;
+      // 叶子优先:若某个子元素也包含该文字,交给更深的那个,避免点到大容器
+      let childHas = false;
+      for (const c of el.children) { if (norm(c.innerText || c.textContent).indexOf(q) >= 0) { childHas = true; break; } }
+      if (childHas) continue;
+      let cs; try { cs = getComputedStyle(el); } catch (e) { continue; }
+      if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      matches.push(el);
+    }
+    if (!matches.length) return JSON.stringify({ count: 0 });
+    const el = matches[Math.min(nth, matches.length - 1)];
+    try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (e) {}
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({
+      count: matches.length,
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2),
+      text: norm(el.innerText || el.textContent).slice(0, 80)
+    });
+  })()`
+
+  const res = (await cdp(wc, 'Runtime.evaluate', { expression: expr, returnByValue: true })) as {
+    result?: { value?: string }
+  }
+  const info = JSON.parse(res.result?.value ?? '{"count":0}') as {
+    count: number
+    x?: number
+    y?: number
+    text?: string
+  }
+  if (!info.count || info.x == null || info.y == null) {
+    throw new ActionError(`页面上找不到文字包含「${q}」的可点元素。换个更短 / 更准确的文字再试,或先 observe。`)
+  }
+  await sleep(150) // 等 scrollIntoView 落定
+  await clickAt(wc, info.x, info.y)
+  await sleep(SETTLE_AFTER_ACTION)
+  const more = info.count > 1 ? `(共 ${info.count} 个匹配,点了第 ${Math.min(nth, info.count - 1) + 1} 个)` : ''
+  return `已按文字点击「${info.text}」${more}`
+}
+
 export async function type(
   targetId: number,
   snap: PageSnapshot,
@@ -237,23 +299,47 @@ export async function scroll(
 ): Promise<string> {
   const wc = resolve(targetId)
 
-  const expression =
-    direction === 'top'
-      ? 'window.scrollTo({ top: 0, behavior: "instant" })'
-      : direction === 'bottom'
-        ? 'window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" })'
-        : `window.scrollBy({ top: ${direction === 'up' ? '-' : ''}${amount ?? 'window.innerHeight * 0.8'}, behavior: "instant" })`
+  // 读视口尺寸与当前滚动位置(仅用于定位滚轮落点与步长 / 回报,不是元素观察)
+  const readState = async (): Promise<{ w: number; h: number; y: number; sh: number }> => {
+    const r = (await cdp(wc, 'Runtime.evaluate', {
+      expression:
+        'JSON.stringify({ w: window.innerWidth, h: window.innerHeight, y: Math.round(window.scrollY), sh: Math.round(document.documentElement.scrollHeight) })',
+      returnByValue: true
+    })) as { result?: { value?: string } }
+    return JSON.parse(r.result?.value ?? '{"w":1024,"h":768,"y":0,"sh":0}')
+  }
 
-  await cdp(wc, 'Runtime.evaluate', { expression })
-  await sleep(300)
+  const s0 = await readState()
+  const cx = Math.round(s0.w / 2)
+  const cy = Math.round(s0.h / 2)
+  const step = amount ?? Math.round(s0.h * 0.8)
 
-  const pos = (await cdp(wc, 'Runtime.evaluate', {
-    expression:
-      'JSON.stringify({ y: Math.round(window.scrollY), h: Math.round(document.body.scrollHeight) })',
-    returnByValue: true
-  })) as { result?: { value?: string } }
-  const { y, h } = JSON.parse(pos.result?.value ?? '{"y":0,"h":0}')
-  return `已滚动(${direction}),当前位置 ${y}/${h}`
+  // 下发一次真实滚轮事件(模拟人工滚动,能触发懒加载 / 虚拟列表 / 滚动监听)
+  const wheel = async (deltaY: number): Promise<void> => {
+    await cdp(wc, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x: cx, y: cy, deltaX: 0, deltaY })
+    await sleep(140)
+  }
+
+  if (direction === 'down') {
+    await wheel(step)
+  } else if (direction === 'up') {
+    await wheel(-step)
+  } else {
+    // top / bottom:连续滚轮直到到顶 / 到底(模拟一直滚),位置不再变化就停
+    const dir = direction === 'bottom' ? 1 : -1
+    const chunk = Math.max(step, s0.h)
+    let last = -1
+    for (let i = 0; i < 50; i++) {
+      await wheel(dir * chunk)
+      const y = (await readState()).y
+      if (y === last) break
+      last = y
+    }
+  }
+
+  await sleep(200)
+  const s1 = await readState()
+  return `已滚动(${direction}),当前位置 ${s1.y}/${s1.sh}`
 }
 
 export async function goBack(targetId: number): Promise<string> {

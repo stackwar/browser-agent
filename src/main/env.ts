@@ -40,6 +40,9 @@ export function loadEnv(): void {
   const candidates = [
     join(app.getAppPath(), '.env'),
     join(process.cwd(), '.env'),
+    // 开发态:项目内的随包配置;打包态:<resources>/app.env(extraResources 放入)
+    join(process.cwd(), 'resources', 'app.env'),
+    join(process.resourcesPath, 'app.env'),
     join(app.getPath('userData'), '.env')
   ]
 

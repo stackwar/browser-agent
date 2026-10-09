@@ -14,6 +14,8 @@
  * 持久化是增强,不该因为写盘失败影响正在进行的对话。
  */
 
+import type { RunState, RunStep } from '@shared/types'
+
 const PREFIX = 'ba:msgs:'
 
 export interface PersistedThumb {
@@ -28,6 +30,11 @@ export interface PersistedMessage {
   role: 'user' | 'assistant'
   content: string
   thumbs?: PersistedThumb[]
+  /** 附带的文档名单(仅名称) */
+  files?: { id: string; name: string }[]
+  /** 助手消息的执行轨迹(步骤),持久化后历史也能查看 */
+  steps?: RunStep[]
+  status?: RunState['status']
 }
 
 function key(sessionId: string): string {
@@ -61,8 +68,15 @@ export function saveMessages(sessionId: string, messages: PersistedMessage[]): v
   try {
     const textOnly = messages.map(({ thumbs: _thumbs, ...rest }) => rest)
     localStorage.setItem(k, JSON.stringify(textOnly))
+    return
   } catch {
-    // 还不行就算了,持久化不是硬需求
+    // 还不行:连轨迹也去掉,只留 role/content
+  }
+  try {
+    const minimal = messages.map((m) => ({ id: m.id, role: m.role, content: m.content }))
+    localStorage.setItem(k, JSON.stringify(minimal))
+  } catch {
+    // 实在存不下就算了,持久化不是硬需求
   }
 }
 
