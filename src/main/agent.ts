@@ -43,9 +43,8 @@ const MAX_TOKENS = 8000
  */
 export const AVAILABLE_MODELS = [
   { id: 'qwen3.7-plus', name: 'Qwen3.7-Plus（通义千问）', vision: true, provider: 1 },
-  // ⚠️ 豆包模型 id 待确认:aihub 对所有常见命名都返回「不存在或无权访问」,
-  // 需换成账号实际可用的豆包模型 id(并确认该 key 有豆包权限)。
-  { id: 'doubao-pro-32k', name: '豆包 Doubao-Pro-32k', vision: false, provider: 2 }
+  { id: 'doubao-seed-2-1-pro-260628', name: '豆包 Seed-2.1-Pro', vision: true, provider: 2 },
+  { id: 'doubao-seed-2-1-turbo-260628', name: '豆包 Seed-2.1-Turbo', vision: true, provider: 2 }
 ] as const
 
 /**
