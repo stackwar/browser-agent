@@ -591,14 +591,23 @@ export async function runAgent(
     }
   }
 
+  // 页面上下文 + 附件文本作为**独立的前置 user 消息**,用户真正的 prompt 单独一条 ——
+  // 这样轨迹里能清晰区分「上下文」与「用户」,而不是把问题埋进一大段上下文里。
+  const contextMsg = (pageContext + fileText).trim()
+  const freshMsgs: ChatCompletionMessageParam[] = []
+  if (contextMsg) freshMsgs.push({ role: 'user', content: contextMsg })
+  freshMsgs.push(buildUserMessage(prompt, images))
+
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: buildSystem(vision) },
     ...prior,
-    buildUserMessage(pageContext + fileText + prompt, images)
+    ...freshMsgs
   ]
   // 本轮新增消息的起点:结束时只把这之后的部分并入历史,避免历史被重复累加
-  const freshFrom = messages.length - 1
+  const freshFrom = messages.length - freshMsgs.length
   const replies: string[] = []
+  // 工具调用耗时(call.id → ms),给轨迹的「时长」视图用
+  const toolMs = new Map<string, number>()
   /**
    * 用户接管后留下的说明,等下一条工具结果带给模型。
    *
@@ -779,7 +788,9 @@ export async function runAgent(
 
         const done = deps.onAction(describeTool(call.function.name, input))
         try {
+          const t0 = Date.now()
           const outcome = await runTool(call.function.name, input, targetId, lastSnapshot, vision)
+          toolMs.set(call.id, Date.now() - t0)
           if (outcome.snapshot) lastSnapshot = outcome.snapshot
           if (outcome.screenshot) pendingShots.push(outcome.screenshot)
           done(outcome.content.split('\n')[0])
@@ -824,7 +835,7 @@ export async function runAgent(
     // 回传本次 run 的完整轨迹(供「轨迹」视图);系统提示仅在会话首个 run 带上
     if (deps.onTrace) {
       try {
-        deps.onTrace(buildTrace(messages.slice(freshFrom)))
+        deps.onTrace(buildTrace(messages.slice(freshFrom), toolMs))
       } catch {
         /* 轨迹是增强,失败不影响主流程 */
       }
@@ -853,7 +864,10 @@ const traceTrunc = (s: string, n: number): string => (s.length > n ? `${s.slice(
 
 /** 把一次 run 的消息转成轨迹条目:assistant 文本单列,tool_call 与其结果配对成一行。
  *  不含 system 提示 —— 轨迹只回看对话与工具调用。 */
-function buildTrace(runMessages: ChatCompletionMessageParam[]): TraceEntry[] {
+function buildTrace(
+  runMessages: ChatCompletionMessageParam[],
+  toolMs: Map<string, number> = new Map()
+): TraceEntry[] {
   const out: TraceEntry[] = []
   // tool_call_id → 结果文本
   const results = new Map<string, string>()
@@ -869,6 +883,7 @@ function buildTrace(runMessages: ChatCompletionMessageParam[]): TraceEntry[] {
       const content = traceText(m.content)
       const isCtx =
         content.startsWith('【当前页面】') ||
+        content.startsWith('【附件:') ||
         content.startsWith(session.SCREENSHOT_NOTE) ||
         content.includes('(此处有')
       out.push({
@@ -899,7 +914,8 @@ function buildTrace(runMessages: ChatCompletionMessageParam[]): TraceEntry[] {
             result: traceTrunc(results.get(c.id) ?? '', 1200)
           },
           turn,
-          runId: ''
+          runId: '',
+          ms: toolMs.get(c.id)
         })
       }
     }

@@ -1,16 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal } from 'antd'
-import ChatPanel from './components/ChatPanel'
+import ChatPanel, { type ChatPanelHandle } from './components/ChatPanel'
+import Sidebar from './components/Sidebar'
 import BrowserPane from './components/BrowserPane'
 import StatusBar from './components/StatusBar'
 import { usePanelWidth } from './hooks/usePanelWidth'
 import { applyTheme } from './theme'
+import type { SessionMeta } from '@shared/types'
 
 export default function App() {
   // <webview> 的 webContents id:Agent 的 CDP target
   const [targetId, setTargetId] = useState<number | null>(null)
   const onTargetChange = useCallback((id: number | null) => setTargetId(id), [])
   const panel = usePanelWidth()
+
+  // 左侧会话栏数据(由 ChatPanel 通过 onSessionsChanged 回传;操作走 chatRef)
+  const chatRef = useRef<ChatPanelHandle>(null)
+  const [sessions, setSessions] = useState<SessionMeta[]>([])
+  const [activeId, setActiveId] = useState<string>('')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem('ba:sidebar-collapsed') === '1'
+  )
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((c) => {
+      const next = !c
+      localStorage.setItem('ba:sidebar-collapsed', next ? '1' : '0')
+      return next
+    })
+  }, [])
+  const onSessionsChanged = useCallback((list: SessionMeta[], active: string) => {
+    setSessions(list)
+    setActiveId(active)
+  }, [])
 
   // 启动时按设置应用主题(默认深色)
   useEffect(() => {
@@ -47,7 +68,22 @@ export default function App() {
     // 拖动期间整棵树加 resizing:拿它屏掉 webview 的命中测试,
     // 否则指针进到 webview 里就不再回传事件,拖动会断。
     <div className={`app${panel.dragging ? ' resizing' : ''}`}>
-      <ChatPanel targetId={targetId} width={panel.width} />
+      <Sidebar
+        sessions={sessions}
+        activeId={activeId}
+        busy={false}
+        collapsed={sidebarCollapsed}
+        onToggle={toggleSidebar}
+        onNew={() => chatRef.current?.newSession()}
+        onSelect={(id) => chatRef.current?.selectSession(id)}
+        onDelete={(id) => chatRef.current?.deleteSession(id)}
+      />
+      <ChatPanel
+        ref={chatRef}
+        targetId={targetId}
+        width={panel.width}
+        onSessionsChanged={onSessionsChanged}
+      />
       <div
         className="splitter"
         onPointerDown={panel.onPointerDown}

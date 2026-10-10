@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHandle, type ReactNode } from 'react'
 import { Button, Dropdown, Image, Menu, Tooltip, message } from 'antd'
 import {
   ClearOutlined,
-  DeleteOutlined,
-  HistoryOutlined,
   PaperClipOutlined,
-  PlusOutlined,
   SendOutlined,
   SettingOutlined,
   StopOutlined,
@@ -43,13 +40,6 @@ const nextId = (): string => `m-${Date.now()}-${seq++}`
 
 const kb = (bytes: number): string => `${Math.max(1, Math.round(bytes / 1024))} KB`
 
-/** 会话列表里的时间:月-日 时:分 */
-const fmtTime = (ts: number): string => {
-  const d = new Date(ts)
-  const pad = (n: number): string => String(n).padStart(2, '0')
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 /**
  * 把 http 图片链接升到 https。
  *
@@ -69,6 +59,15 @@ interface Props {
   targetId: number | null
   /** 由 App 的分隔条控制,写成行内样式盖掉 CSS 里的默认宽度 */
   width: number
+  /** 会话列表 / 活动会话变化时通知外层(左侧栏据此刷新) */
+  onSessionsChanged?: (sessions: SessionMeta[], activeId: string) => void
+}
+
+/** 暴露给左侧栏调用的命令式接口 */
+export interface ChatPanelHandle {
+  newSession: () => void
+  selectSession: (id: string) => void
+  deleteSession: (id: string) => void
 }
 
 const GREETING =
@@ -101,7 +100,10 @@ function Markdown({ children }: { children: string }): ReactNode {
   )
 }
 
-export default function ChatPanel({ targetId, width }: Props) {
+const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
+  { targetId, width, onSessionsChanged },
+  ref
+) {
   const [messages, setMessages] = useState<Message[]>([
     { id: '0', role: 'assistant', content: GREETING }
   ])
@@ -131,7 +133,8 @@ export default function ChatPanel({ targetId, width }: Props) {
     const [list, info] = await Promise.all([window.api.session.list(), window.api.session.info()])
     setSessions(list)
     setActiveId(info.activeId)
-  }, [])
+    onSessionsChanged?.(list, info.activeId)
+  }, [onSessionsChanged])
 
   /**
    * 把某会话载入消息区。优先用渲染层持久化的展示记录(含缩略图),
@@ -201,6 +204,13 @@ export default function ChatPanel({ targetId, width }: Props) {
     [busy, activeId, loadSession, refreshSessions]
   )
 
+  // 暴露给左侧栏:新建 / 切换 / 删除会话
+  useImperativeHandle(
+    ref,
+    () => ({ newSession, selectSession, deleteSession }),
+    [newSession, selectSession, deleteSession]
+  )
+
   // 消息区变化就把展示记录(文字 + 缩略图)写进当前会话的 localStorage,
   // 这样切换会话、重启后卡片里的图片都还在。空 id(未初始化)时跳过。
   useEffect(() => {
@@ -254,7 +264,9 @@ export default function ChatPanel({ targetId, width }: Props) {
         const info = await window.api.session.info()
         setVision(info.vision)
         setActiveId(info.activeId)
-        setSessions(await window.api.session.list())
+        const list = await window.api.session.list()
+        setSessions(list)
+        onSessionsChanged?.(list, info.activeId)
         await loadSession(info.activeId)
         void window.api.settings.get().then((s) => setMenuTheme(s.theme))
       } catch {
@@ -409,57 +421,6 @@ export default function ChatPanel({ targetId, width }: Props) {
           {sessions.find((s) => s.id === activeId)?.title ?? 'Agent 对话'}
         </span>
         <div className="chat-actions">
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            icon={<PlusOutlined />}
-            disabled={busy}
-            onClick={() => void newSession()}
-          >
-            新建会话
-          </Button>
-          <Dropdown
-            trigger={['click']}
-            disabled={busy}
-            placement="bottomRight"
-            overlay={
-              <Menu
-                theme={menuTheme}
-                selectedKeys={[activeId]}
-                onClick={({ key }) => void selectSession(String(key))}
-                items={
-                  sessions.length === 0
-                    ? [{ key: '__empty__', disabled: true, label: '暂无历史会话' }]
-                    : sessions.map((s) => ({
-                      key: s.id,
-                      label: (
-                        <div className="session-item">
-                          <span className="session-item-title">{s.title}</span>
-                          <span className="session-item-meta">
-                            {fmtTime(s.updatedAt)} · {s.messageCount}
-                          </span>
-                          <Tooltip title="删除会话">
-                            <DeleteOutlined
-                              className="session-item-del"
-                              role="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void deleteSession(s.id)
-                              }}
-                            />
-                          </Tooltip>
-                        </div>
-                      )
-                    }))
-                }
-              />
-            }
-          >
-            <Tooltip title="历史会话">
-              <Button size="small" type="text" icon={<HistoryOutlined />} />
-            </Tooltip>
-          </Dropdown>
           <Tooltip title="清空当前会话">
             <Button
               size="small"
@@ -693,4 +654,6 @@ export default function ChatPanel({ targetId, width }: Props) {
       <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </aside>
   )
-}
+})
+
+export default ChatPanel

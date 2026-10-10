@@ -75,6 +75,8 @@ export interface TraceEntry {
   turn: number
   /** 所属 run */
   runId: string
+  /** 该条目耗时(毫秒),目前工具调用有真实值,其余为 0/缺省 */
+  ms?: number
 }
 
 /** 检查更新结果 */
