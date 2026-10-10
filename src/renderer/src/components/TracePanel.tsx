@@ -13,6 +13,7 @@ const mdComponents: Components = {
       href={href}
       onClick={(e) => {
         e.preventDefault()
+        e.stopPropagation()
         if (href) window.open(href, '_blank', 'noopener,noreferrer')
       }}
     >
@@ -57,12 +58,23 @@ export default function TracePanel({ sessionId, active, busy }: Props) {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<SparkMode>('calls')
   const [loading, setLoading] = useState(false)
+  // 默认每条只显示一行,点击展开;记录被展开的行
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggle = useCallback((i: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     if (!sessionId) return
     setLoading(true)
     try {
       setEntries(await window.api.trace.get(sessionId))
+      setExpanded(new Set())
     } catch {
       setEntries([])
     } finally {
@@ -171,7 +183,11 @@ export default function TracePanel({ sessionId, active, busy }: Props) {
             return (
               <div key={i}>
                 {turnAt[i] > 0 && <div className="trace-turn">第 {turnAt[i]} 轮</div>}
-                <div className={`trace-row role-${e.role}`}>
+                <div
+                  className={`trace-row role-${e.role}${expanded.has(i) ? ' expanded' : ' clamped'}`}
+                  onClick={() => toggle(i)}
+                  title={expanded.has(i) ? '收起' : '展开'}
+                >
                   <span className={`trace-badge badge-${e.role}`}>{ROLE_LABEL[e.role]}</span>
                   {e.tool ? (
                     <span className="trace-content">

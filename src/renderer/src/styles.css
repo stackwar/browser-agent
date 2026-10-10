@@ -393,35 +393,54 @@ button.ghost:disabled {
 
 .composer {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--border);
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
 }
-
-/* 附加按钮与输入框同高,好对齐 */
-.composer .attach {
-  flex: none;
+.composer:focus-within {
+  border-color: var(--accent);
 }
 
 .composer textarea {
-  flex: 1;
-  /* 与 antd 默认按钮(32px)同高:单行输入,整条底栏对齐 */
-  height: 32px;
-  line-height: 20px;
+  width: 100%;
+  min-height: 64px;
+  max-height: 180px;
+  line-height: 1.5;
   resize: none;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 8px;
+  border: none;
+  padding: 2px;
   font-family: inherit;
   font-size: 14px;
 }
 
 .composer textarea:focus {
   outline: none;
-  border-color: var(--accent);
+}
+
+/* 底部栏:左 附件 + 提示,右 圆形发送/停止 */
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.composer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.composer-hint {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------- 步骤轨迹 ---------- */
@@ -531,6 +550,7 @@ button.ghost:disabled {
   align-items: center;
   gap: 6px;
   padding: 8px;
+  padding-right: 48px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -784,7 +804,7 @@ body {
 }
 
 /* 输入框聚焦辉光 */
-.composer textarea:focus,
+.composer:focus-within,
 .url-input:focus,
 .control-note:focus {
   box-shadow:
@@ -972,6 +992,29 @@ body {
 .trace-row:hover {
   background: rgba(137, 180, 250, 0.06);
 }
+/* 默认单行,超出省略号;点击整行展开 */
+.trace-row {
+  cursor: pointer;
+}
+.trace-row.clamped {
+  align-items: center;
+}
+.trace-row.clamped .trace-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-row.clamped .trace-md,
+.trace-row.clamped .trace-md p,
+.trace-row.clamped .trace-md li {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-row.clamped .trace-md > * {
+  display: inline;
+}
 .trace-badge {
   flex: none;
   align-self: flex-start;
@@ -1151,12 +1194,47 @@ body {
   padding: 12px 0;
   justify-content: center;
 }
+/* 客户端右上角账户入口 */
+.account-menu {
+  position: fixed;
+  top: 6px;
+  right: 10px;
+  z-index: 1000;
+}
+.account-menu .ant-btn {
+  color: var(--muted);
+}
+.account-menu .ant-btn:hover {
+  color: var(--text);
+}
+
 .sidebar-rail {
   padding: 10px 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+}
+
+/* 底部设置区:左下角 */
+.sidebar-footer {
+  flex: none;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 8px;
+  display: flex;
+}
+.sidebar-footer .sidebar-settings {
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sidebar-footer .sidebar-settings:hover {
+  color: var(--text);
+}
+.sidebar.collapsed .sidebar-footer {
+  justify-content: center;
 }
 .sidebar-brand img {
   border-radius: 6px;
@@ -1295,4 +1373,90 @@ body {
 }
 .spark-cell.tool.on {
   background: var(--warn);
+}
+
+/* ===================== 新会话欢迎页 + 预制指令 ===================== */
+.welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  gap: 6px;
+}
+.welcome-logo {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: var(--grad);
+  box-shadow: 0 10px 24px -10px var(--glow);
+}
+.welcome-logo img {
+  border-radius: 10px;
+}
+.welcome-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 12px;
+}
+.welcome-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.welcome-presets {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.preset-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--assistant);
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    transform 0.08s;
+}
+.preset-card:hover {
+  border-color: var(--accent);
+  background: rgba(137, 180, 250, 0.08);
+}
+.preset-card:active {
+  transform: translateY(1px);
+}
+.preset-icon {
+  font-size: 20px;
+  flex: none;
+}
+.preset-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.preset-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.preset-desc {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

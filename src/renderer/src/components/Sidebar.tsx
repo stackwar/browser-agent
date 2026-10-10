@@ -3,7 +3,8 @@ import {
   PlusOutlined,
   DeleteOutlined,
   MenuFoldOutlined,
-  MenuUnfoldOutlined
+  MenuUnfoldOutlined,
+  SettingOutlined
 } from '@ant-design/icons'
 import type { SessionMeta } from '@shared/types'
 import logo from '../assets/logo.png'
@@ -17,6 +18,7 @@ interface Props {
   onNew: () => void
   onSelect: (id: string) => void
   onDelete: (id: string) => void
+  onOpenSettings: () => void
 }
 
 const fmtTime = (ts: number): string => {
@@ -34,7 +36,8 @@ export default function Sidebar({
   onToggle,
   onNew,
   onSelect,
-  onDelete
+  onDelete,
+  onOpenSettings
 }: Props) {
   return (
     <aside className={`sidebar${collapsed ? ' collapsed' : ''}`}>
@@ -115,6 +118,20 @@ export default function Sidebar({
           </div>
         </>
       )}
+
+      <div className="sidebar-footer">
+        <Tooltip title="设置" placement="right">
+          <Button
+            type="text"
+            className="sidebar-settings"
+            icon={<SettingOutlined />}
+            onClick={onOpenSettings}
+            aria-label="设置"
+          >
+            {collapsed ? null : '设置'}
+          </Button>
+        </Tooltip>
+      </div>
     </aside>
   )
 }

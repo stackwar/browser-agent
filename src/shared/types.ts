@@ -32,6 +32,20 @@ export interface ModelOption {
   vision: boolean
 }
 
+/** 开发者自定义模型(OpenAI 兼容端点)。隐藏功能,不对普通用户开放。 */
+export interface CustomModelConfig {
+  /** 启用后覆盖内置模型选择,直连该端点(标准 OpenAI 协议,不发 aihub 计费头) */
+  enabled: boolean
+  /** OpenAI 兼容 baseURL,如 https://api.openai.com/v1 */
+  baseURL: string
+  /** 密钥。仅主进程读取,不回传渲染层。 */
+  apiKey: string
+  /** 模型 id,如 gpt-4o */
+  model: string
+  /** 是否读图 */
+  vision: boolean
+}
+
 /** 可持久化的应用设置 */
 export interface AppSettings {
   /** 选中的模型 id;空串表示用环境变量 / 默认值 */
@@ -42,6 +56,8 @@ export interface AppSettings {
   apiKey: string
   /** 界面主题 */
   theme: 'dark' | 'light'
+  /** 开发者自定义模型(隐藏) */
+  custom: CustomModelConfig
 }
 
 /** 设置面板用:当前生效设置 + 可选模型列表 */
@@ -54,6 +70,15 @@ export interface SettingsInfo {
   hasApiKey: boolean
   /** 界面主题 */
   theme: 'dark' | 'light'
+  /** 开发者自定义模型配置(隐藏);不含密钥,只回传是否已配置 */
+  custom: {
+    enabled: boolean
+    baseURL: string
+    model: string
+    vision: boolean
+    /** 是否已配置自定义密钥 */
+    hasKey: boolean
+  }
 }
 
 /** 已加载的插件工具信息(设置面板展示用) */

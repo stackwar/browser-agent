@@ -4,6 +4,7 @@ import ChatPanel, { type ChatPanelHandle } from './components/ChatPanel'
 import Sidebar from './components/Sidebar'
 import BrowserPane from './components/BrowserPane'
 import StatusBar from './components/StatusBar'
+import AccountMenu from './components/AccountMenu'
 import { usePanelWidth } from './hooks/usePanelWidth'
 import { applyTheme } from './theme'
 import type { SessionMeta } from '@shared/types'
@@ -68,6 +69,7 @@ export default function App() {
     // 拖动期间整棵树加 resizing:拿它屏掉 webview 的命中测试,
     // 否则指针进到 webview 里就不再回传事件,拖动会断。
     <div className={`app${panel.dragging ? ' resizing' : ''}`}>
+      <AccountMenu />
       <Sidebar
         sessions={sessions}
         activeId={activeId}
@@ -77,6 +79,7 @@ export default function App() {
         onNew={() => chatRef.current?.newSession()}
         onSelect={(id) => chatRef.current?.selectSession(id)}
         onDelete={(id) => chatRef.current?.deleteSession(id)}
+        onOpenSettings={() => chatRef.current?.openSettings()}
       />
       <ChatPanel
         ref={chatRef}

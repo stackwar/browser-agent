@@ -10,7 +10,13 @@ import type { AppSettings } from '../shared/types'
  * 环境变量 BROWSER_AGENT_MODEL 或内置默认值 —— 这样没点过设置的用户行为不变。
  */
 
-const DEFAULTS: AppSettings = { model: '', maxTurns: 50, apiKey: '', theme: 'dark' }
+const DEFAULTS: AppSettings = {
+  model: '',
+  maxTurns: 50,
+  apiKey: '',
+  theme: 'dark',
+  custom: { enabled: false, baseURL: '', apiKey: '', model: '', vision: true }
+}
 
 let cache: AppSettings | null = null
 
@@ -22,19 +28,28 @@ function load(): AppSettings {
   if (cache) return cache
   try {
     const raw = JSON.parse(readFileSync(file(), 'utf-8')) as Partial<AppSettings>
-    cache = { ...DEFAULTS, ...raw }
+    cache = { ...DEFAULTS, ...raw, custom: { ...DEFAULTS.custom, ...(raw.custom ?? {}) } }
   } catch {
-    cache = { ...DEFAULTS }
+    cache = { ...DEFAULTS, custom: { ...DEFAULTS.custom } }
   }
   return cache
 }
 
 export function get(): AppSettings {
-  return { ...load() }
+  const s = load()
+  return { ...s, custom: { ...s.custom } }
 }
 
 export function update(patch: Partial<AppSettings>): AppSettings {
-  const next: AppSettings = { ...load(), ...patch }
+  const prev = load()
+  const next: AppSettings = { ...prev, ...patch }
+  // custom 字段级合并:空密钥表示不改动,保留原密钥
+  if (patch.custom) {
+    next.custom = { ...prev.custom, ...patch.custom }
+    if (!patch.custom.apiKey) next.custom.apiKey = prev.custom.apiKey
+  } else {
+    next.custom = { ...prev.custom }
+  }
   // maxTurns 兜底:别让 UI 传来 0 / 负数 / 非数把 run 卡死
   if (!Number.isFinite(next.maxTurns) || next.maxTurns < 1) next.maxTurns = DEFAULTS.maxTurns
   next.maxTurns = Math.min(200, Math.round(next.maxTurns))
@@ -46,5 +61,5 @@ export function update(patch: Partial<AppSettings>): AppSettings {
   } catch (err) {
     console.warn('[settings] 持久化失败:', err)
   }
-  return { ...next }
+  return get()
 }

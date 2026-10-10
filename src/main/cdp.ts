@@ -196,13 +196,23 @@ export function registerCdpHandlers(): void {
   ipcMain.handle('upload:image', (_event, image: ImageAttachment) => uploadImage(image))
 
   // 设置
-  const settingsInfo = (): SettingsInfo => ({
-    model: modelInfo().model,
-    maxTurns: settings.get().maxTurns,
-    models: AVAILABLE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })),
-    hasApiKey: hasApiKey(),
-    theme: settings.get().theme
-  })
+  const settingsInfo = (): SettingsInfo => {
+    const s = settings.get()
+    return {
+      model: modelInfo().model,
+      maxTurns: s.maxTurns,
+      models: AVAILABLE_MODELS.map((m) => ({ id: m.id, name: m.name, vision: m.vision })),
+      hasApiKey: hasApiKey(),
+      theme: s.theme,
+      custom: {
+        enabled: s.custom.enabled,
+        baseURL: s.custom.baseURL,
+        model: s.custom.model,
+        vision: s.custom.vision,
+        hasKey: Boolean(s.custom.apiKey)
+      }
+    }
+  }
   ipcMain.handle('settings:get', () => settingsInfo())
   ipcMain.handle('settings:update', (_event, patch: Partial<AppSettings>) => {
     settings.update(patch)

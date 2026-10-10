@@ -65,10 +65,19 @@ const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'i
 /** 会改变页面 / 输入的动作:执行前才锁浏览器(显示遮罩)。observe/read_text 只读不锁。 */
 const ACTIVE_BROWSER_ACTIONS = new Set(['navigate', 'click', 'click_text', 'type', 'scroll', 'go_back'])
 
-/** 当前模型:设置面板选的 > 环境变量 > 内置默认。
+/** 启用中的开发者自定义模型(OpenAI 兼容端点);未启用 / 配置不全时返回 null。 */
+function custom(): { baseURL: string; apiKey: string; model: string; vision: boolean } | null {
+  const c = settings.get().custom
+  if (c && c.enabled && c.model.trim() && c.baseURL.trim()) return c
+  return null
+}
+
+/** 当前模型:开发者自定义 > 设置面板选的 > 环境变量 > 内置默认。
  *  只接受在 AVAILABLE_MODELS 里的值 —— 换过模型列表后,旧配置里失效的 model
  *  (比如之前存的 deepseek-flash)会被忽略,回退到默认,避免发出去被 400。 */
 function currentModel(): string {
+  const c = custom()
+  if (c) return c.model.trim()
   const ids = new Set<string>(AVAILABLE_MODELS.map((m) => m.id))
   const chosen = settings.get().model
   if (chosen && ids.has(chosen)) return chosen
@@ -78,6 +87,8 @@ function currentModel(): string {
 }
 
 function supportsVision(model: string): boolean {
+  const c = custom()
+  if (c) return c.vision
   return VISION_MODELS.has(model)
 }
 
@@ -112,8 +123,10 @@ export interface AgentDeps {
  */
 const DEFAULT_API_KEY = ''
 
-/** 生效的 API key:设置 > 环境变量 BROWSER_AGENT_API_KEY > 内置默认 */
+/** 生效的 API key:开发者自定义 > 设置 > 环境变量 BROWSER_AGENT_API_KEY > 内置默认 */
 function apiKey(): string {
+  const c = custom()
+  if (c) return c.apiKey
   return settings.get().apiKey || process.env.BROWSER_AGENT_API_KEY || DEFAULT_API_KEY
 }
 
@@ -121,14 +134,20 @@ export function hasApiKey(): boolean {
   return Boolean(apiKey())
 }
 
-/** 当前请求该带的 provider_type:环境变量优先,否则取当前模型在表里的 provider */
+/** 当前请求该带的 provider_type:自定义模型走标准 OpenAI 不发头;否则环境变量优先,再取模型表里的 provider */
 function providerType(): string | undefined {
+  if (custom()) return undefined
   if (process.env.BROWSER_AGENT_PROVIDER_TYPE) return process.env.BROWSER_AGENT_PROVIDER_TYPE
   const m = AVAILABLE_MODELS.find((x) => x.id === currentModel())
   return m ? String(m.provider) : undefined
 }
 
 function createClient(): OpenAI {
+  const c = custom()
+  // 开发者自定义模型:标准 OpenAI 协议,直连其 baseURL,不带 aihub 计费头
+  if (c) {
+    return new OpenAI({ apiKey: c.apiKey, baseURL: c.baseURL.trim() })
+  }
   const pt = providerType()
   return new OpenAI({
     apiKey: apiKey(),

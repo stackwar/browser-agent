@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState, forwardRef, useImperativeHandle, type ReactNode } from 'react'
-import { Button, Dropdown, Image, Menu, Tooltip, message } from 'antd'
+import { Button, Image, Tooltip, message } from 'antd'
 import {
   ClearOutlined,
   PaperClipOutlined,
   SendOutlined,
-  SettingOutlined,
-  StopOutlined,
-  UserOutlined
+  StopOutlined
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -19,7 +17,7 @@ import { loadMessages, removeMessages, saveMessages } from '../sessionStore'
 import StepList from './StepList'
 import CollapsibleSteps from './CollapsibleSteps'
 import SettingsModal from './SettingsModal'
-import AboutModal from './AboutModal'
+import WelcomeHero from './WelcomeHero'
 import TracePanel from './TracePanel'
 
 interface Message {
@@ -68,6 +66,7 @@ export interface ChatPanelHandle {
   newSession: () => void
   selectSession: (id: string) => void
   deleteSession: (id: string) => void
+  openSettings: () => void
 }
 
 const GREETING =
@@ -117,11 +116,10 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
   const [sessions, setSessions] = useState<SessionMeta[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [aboutOpen, setAboutOpen] = useState(false)
   const [view, setView] = useState<'chat' | 'trace'>('chat')
-  const [menuTheme, setMenuTheme] = useState<'dark' | 'light'>('dark')
   const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
   // run 已被归档进消息列表,避免 StrictMode 下重复 effect 触发两次归档
   const archived = useRef<string | null>(null)
   // 当前会话 id 的同步副本:持久化 effect 读它来决定写进哪个会话的 localStorage。
@@ -207,7 +205,7 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
   // 暴露给左侧栏:新建 / 切换 / 删除会话
   useImperativeHandle(
     ref,
-    () => ({ newSession, selectSession, deleteSession }),
+    () => ({ newSession, selectSession, deleteSession, openSettings: () => setSettingsOpen(true) }),
     [newSession, selectSession, deleteSession]
   )
 
@@ -268,7 +266,6 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
         setSessions(list)
         onSessionsChanged?.(list, info.activeId)
         await loadSession(info.activeId)
-        void window.api.settings.get().then((s) => setMenuTheme(s.theme))
       } catch {
         setVision(false)
       }
@@ -319,8 +316,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
     await refreshSessions()
   }, [attachments, refreshSessions])
 
-  const send = async (): Promise<void> => {
-    const text = input.trim()
+  const send = async (override?: string): Promise<void> => {
+    const text = (override ?? input).trim()
     const pend = attachments.images
     const pendFiles = docs.files
     // 有字 / 有图 / 有文件,任一即可发送
@@ -404,6 +401,10 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
     targetId !== null &&
     (input.trim().length > 0 || attachments.images.length > 0 || docs.files.length > 0)
 
+  // 新会话欢迎页:还没有任何用户消息、且不在跑/流式时,中栏显示预制指令
+  const showHero =
+    view === 'chat' && !busy && !streamingText && !messages.some((m) => m.role === 'user')
+
   return (
     <aside
       className={`chat-panel${dragging ? ' dropping' : ''}`}
@@ -430,39 +431,6 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
               onClick={() => void clearHistory()}
             />
           </Tooltip>
-          <Tooltip title="设置">
-            <Button
-              size="small"
-              type="text"
-              icon={<SettingOutlined />}
-              onClick={() => setSettingsOpen(true)}
-            />
-          </Tooltip>
-          <Dropdown
-            trigger={['click']}
-            placement="bottomRight"
-            overlay={
-              <Menu
-                theme={menuTheme}
-                onClick={({ key }) => {
-                  // 账户体系尚未接入,这里先只做入口
-                  if (key === 'login') message.info('登录功能开发中')
-                  else if (key === 'profile') message.info('个人中心开发中')
-                  else if (key === 'about') setAboutOpen(true)
-                }}
-                items={[
-                  { key: 'login', label: '登录' },
-                  { key: 'profile', label: '个人中心' },
-                  { type: 'divider' },
-                  { key: 'about', label: '关于' }
-                ]}
-              />
-            }
-          >
-            <Tooltip title="账户">
-              <Button size="small" type="text" icon={<UserOutlined />} />
-            </Tooltip>
-          </Dropdown>
         </div>
       </header>
 
@@ -486,6 +454,10 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
       {view === 'chat' && (
         <>
           <div className="messages" ref={scrollRef}>
+            {showHero ? (
+              <WelcomeHero onPick={(p) => void send(p)} />
+            ) : (
+              <>
         {messages.map((m) => (
           <div key={m.id} className={`msg ${m.role}`}>
             <div className={`bubble${m.status && m.status !== 'done' ? ` bubble-${m.status}` : ''}`}>
@@ -542,6 +514,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
             </div>
           </div>
         )}
+              </>
+            )}
       </div>
 
       {attachments.images.length > 0 && (
@@ -594,16 +568,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
             e.target.value = ''
           }}
         />
-        <Tooltip title={vision ? '附加图片或文档(可粘贴/拖入)' : '附加文档(当前模型不读图)'}>
-          <Button
-            className="attach"
-            icon={<PaperClipOutlined />}
-            aria-label="附加文件"
-            disabled={busy || uploading}
-            onClick={() => fileRef.current?.click()}
-          />
-        </Tooltip>
         <textarea
+          ref={taRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onPaste={onPaste}
@@ -614,25 +580,45 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
               void send()
             }
           }}
-          placeholder={busy ? '执行中,可点击停止…' : '输入消息,让 Agent 操作浏览器…'}
-          rows={1}
+          placeholder={busy ? '执行中,可点击停止…' : '输入消息,让 Agent 操作浏览器,或直接描述需求'}
+          rows={3}
           disabled={busy}
         />
-        {busy ? (
-          <Button danger type="primary" icon={<StopOutlined />} onClick={() => void abort()}>
-            停止
-          </Button>
-        ) : (
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            loading={uploading}
-            disabled={!canSend}
-            onClick={() => void send()}
-          >
-            {uploading ? '上传中' : '发送'}
-          </Button>
-        )}
+        <div className="composer-bar">
+          <div className="composer-left">
+            <Tooltip title={vision ? '附加图片或文档(可粘贴/拖入)' : '附加文档(当前模型不读图)'}>
+              <Button
+                type="text"
+                className="attach"
+                icon={<PaperClipOutlined />}
+                aria-label="附加文件"
+                disabled={busy || uploading}
+                onClick={() => fileRef.current?.click()}
+              />
+            </Tooltip>
+            <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
+          </div>
+          {busy ? (
+            <Button
+              danger
+              type="primary"
+              shape="circle"
+              icon={<StopOutlined />}
+              aria-label="停止"
+              onClick={() => void abort()}
+            />
+          ) : (
+            <Button
+              type="primary"
+              shape="circle"
+              icon={<SendOutlined />}
+              loading={uploading}
+              disabled={!canSend}
+              aria-label="发送"
+              onClick={() => void send()}
+            />
+          )}
+        </div>
       </div>
         </>
       )}
@@ -646,12 +632,8 @@ const ChatPanel = forwardRef<ChatPanelHandle, Props>(function ChatPanel(
             .info()
             .then((info) => setVision(info.vision))
             .catch(() => void 0)
-          // 主题可能变了,下拉菜单跟随
-          void window.api.settings.get().then((s) => setMenuTheme(s.theme))
         }}
       />
-
-      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </aside>
   )
 })

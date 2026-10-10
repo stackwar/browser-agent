@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Button, Input, InputNumber, List, Modal, Radio, Segmented, Space, Tabs, Tag, Tooltip, message } from 'antd'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Button, Input, InputNumber, List, Modal, Radio, Segmented, Space, Switch, Tabs, Tag, Tooltip, message } from 'antd'
 import { FolderOpenOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ModelOption, PluginToolInfo } from '@shared/types'
 import { applyTheme } from '../theme'
@@ -26,6 +26,29 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [saving, setSaving] = useState(false)
 
+  // 隐藏的开发者模式:连点标题解锁,持久化到本机(不对普通用户开放)
+  const [devUnlocked, setDevUnlocked] = useState<boolean>(
+    () => localStorage.getItem('ba:dev-mode') === '1'
+  )
+  const titleHits = useRef(0)
+  const unlockDev = useCallback(() => {
+    if (devUnlocked) return
+    titleHits.current += 1
+    if (titleHits.current >= 3) {
+      setDevUnlocked(true)
+      localStorage.setItem('ba:dev-mode', '1')
+      message.success('已解锁开发者选项')
+    }
+  }, [devUnlocked])
+
+  // 开发者自定义模型(OpenAI 兼容端点)
+  const [customEnabled, setCustomEnabled] = useState(false)
+  const [customBaseURL, setCustomBaseURL] = useState('')
+  const [customModel, setCustomModel] = useState('')
+  const [customVision, setCustomVision] = useState(true)
+  const [customKey, setCustomKey] = useState('')
+  const [hasCustomKey, setHasCustomKey] = useState(false)
+
   const [plugins, setPlugins] = useState<PluginToolInfo[]>([])
   const [pluginDir, setPluginDir] = useState<string>('')
   const [reloading, setReloading] = useState(false)
@@ -42,6 +65,12 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
     setHasApiKey(info.hasApiKey)
     setTheme(info.theme)
     setApiKey('') // 不回显密钥;留空表示不改动
+    setCustomEnabled(info.custom.enabled)
+    setCustomBaseURL(info.custom.baseURL)
+    setCustomModel(info.custom.model)
+    setCustomVision(info.custom.vision)
+    setHasCustomKey(info.custom.hasKey)
+    setCustomKey('') // 同样不回显
     setPlugins(list)
     setPluginDir(d.path)
   }, [])
@@ -59,7 +88,15 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
         model,
         maxTurns,
         theme,
-        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {})
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        // 自定义模型:密钥留空表示不改动(主进程会保留原值)
+        custom: {
+          enabled: customEnabled,
+          baseURL: customBaseURL.trim(),
+          model: customModel.trim(),
+          vision: customVision,
+          apiKey: customKey.trim()
+        }
       })
       message.success('设置已保存')
       applyTheme(theme)
@@ -70,7 +107,7 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
     } finally {
       setSaving(false)
     }
-  }, [model, maxTurns, apiKey, theme, onSaved, onClose])
+  }, [model, maxTurns, apiKey, theme, customEnabled, customBaseURL, customModel, customVision, customKey, onSaved, onClose])
 
   const clearApiKey = useCallback(async (): Promise<void> => {
     await window.api.settings.update({ apiKey: '' })
@@ -94,7 +131,11 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
 
   return (
     <Modal
-      title="设置"
+      title={
+        <span onClick={unlockDev} style={{ cursor: 'default', userSelect: 'none' }}>
+          设置
+        </span>
+      }
       open={open}
       onCancel={onClose}
       onOk={() => void save()}
@@ -233,7 +274,87 @@ export default function SettingsModal({ open, onClose, onSaved }: Props) {
                 />
               </Space>
             )
-          }
+          },
+          ...(devUnlocked
+            ? [
+                {
+                  key: 'dev',
+                  label: '开发者',
+                  children: (
+                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span>
+                          启用自定义模型
+                          {customEnabled ? (
+                            <Tag color="green" style={{ marginLeft: 8 }}>
+                              生效中
+                            </Tag>
+                          ) : null}
+                        </span>
+                        <Switch checked={customEnabled} onChange={setCustomEnabled} />
+                      </div>
+                      <div style={{ color: '#999', fontSize: 12 }}>
+                        隐藏选项,仅供开发者接入自己的付费模型。启用后将<strong>覆盖上方「模型」选择</strong>
+                        ,按标准 OpenAI 协议直连下方端点(不发送内置计费头)。
+                      </div>
+                      <div>
+                        <div style={{ marginBottom: 6 }}>Base URL</div>
+                        <Input
+                          value={customBaseURL}
+                          onChange={(e) => setCustomBaseURL(e.target.value)}
+                          placeholder="https://api.openai.com/v1"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div>
+                        <div style={{ marginBottom: 6 }}>模型 ID</div>
+                        <Input
+                          value={customModel}
+                          onChange={(e) => setCustomModel(e.target.value)}
+                          placeholder="gpt-4o"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div>
+                        <div style={{ marginBottom: 6 }}>
+                          API Key{' '}
+                          {hasCustomKey ? (
+                            <Tag color="green">已配置</Tag>
+                          ) : (
+                            <Tag color="red">未配置</Tag>
+                          )}
+                        </div>
+                        <Input.Password
+                          value={customKey}
+                          onChange={(e) => setCustomKey(e.target.value)}
+                          placeholder={hasCustomKey ? '已配置,留空则不改动' : '粘贴 sk-… 后保存'}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span>模型支持读图(多模态)</span>
+                        <Switch checked={customVision} onChange={setCustomVision} />
+                      </div>
+                      <div style={{ color: '#999', fontSize: 12 }}>
+                        密钥保存在本机 settings.json,仅主进程调用模型时读取,不会上传。
+                      </div>
+                    </Space>
+                  )
+                }
+              ]
+            : [])
         ]}
       />
     </Modal>
